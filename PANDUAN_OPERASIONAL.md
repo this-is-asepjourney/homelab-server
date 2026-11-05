@@ -28,7 +28,7 @@ Homelab Server ini dirancang untuk menyatukan 3 modul mandiri ke dalam satu ekos
 ### Prinsip Zero Duplication (Menggunakan Yang Sudah Ada)
 Server `fa` sudah memiliki software infrastruktur penting yang berjalan stabil. Proyek ini **TIDAK menjalankan kontainer ganda** untuk layanan tersebut:
 - **Grafana Utama (`:3001`)**: Digunakan langsung sebagai visualizer analitik armada mesin IoT.
-- **Prometheus Snap (`:9001`)**: Digunakan sebagai time-series database utama untuk scraping metrik Telegraf dan monitoring PSM.
+- **Prometheus Docker (`:9001`)**: Digunakan sebagai time-series database utama untuk scraping metrik Telegraf dan monitoring PSM.
 - **Mosquitto MQTT (`:1883`)**: Broker yang menerima pesan langsung dari perangkat keras (ESP32).
 - **PostgreSQL (`:5432`)**: Database relasional utama server yang digunakan oleh PSM API.
 - **MySQL (`:3306`)**: Database engine utama untuk aplikasi bisnis (Stock UMKM dll).
@@ -43,9 +43,9 @@ flowchart TD
         ESP3["ESP32 Heatpress #N"]
     end
 
-    subgraph INFRA_EKSISTING["Layanan Eksisting Server fa (Host / Snap)"]
+    subgraph INFRA_EKSISTING["Layanan Eksisting Server fa (Host / Docker)"]
         MQTT["Mosquitto Broker (:1883)"]
-        PROM["Prometheus Snap (:9001)"]
+        PROM["Prometheus Docker (:9001)"]
         GRAF["Grafana Utama (:3001)"]
         PG["PostgreSQL Server (:5432)"]
         MYSQL["MySQL Server (:3306)"]
@@ -97,7 +97,7 @@ flowchart TD
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Mosquitto** | TCP | `1883` | `0.0.0.0:1883` | Host Docker (`pid 5113`) | Broker IoT utama |
 | **Grafana** | HTTP | `3001` | `192.168.25.101:3001` | Host Docker (`pid 4859`) | Dashboard visualisasi |
-| **Prometheus**| HTTP | `9001` | `*:9001` | Snap Service (`pid 1737`) | Server TSDB metrics |
+| **Prometheus**| HTTP | `9001` | `*:9001` | Host Docker (`pid 1737`) | Server TSDB metrics |
 | **PostgreSQL**| TCP | `5432` | `192.168.25.101:5432` | Host Docker (`pid 5206`) | Database utama |
 | **MySQL** | TCP | `3306` | `192.168.25.101:3306` | Host Docker (`pid 4659`) | Database UMKM & inventory |
 | **Uptime Kuma**| HTTP | `3002` | `192.168.25.101:3002` | Host Docker (`pid 4516`) | Health monitoring |
@@ -124,8 +124,8 @@ flowchart TD
 ### Kebutuhan Perangkat Lunak di Server `fa`
 1. **Docker Engine**: Versi 24.0+ dengan plugin Docker Compose v2 (`docker compose version`).
 2. **Python**: Versi 3.10 atau lebih tinggi (`python3 --version`).
-3. **Snapd**: Digunakan untuk mengelola service Prometheus.
-4. **Hak Akses Sudo**: Diperlukan untuk me-reload snap service dan mengelola network socket.
+3. **Docker Prometheus & Grafana**: Service monitoring utama yang sudah berjalan di Docker host.
+4. **Hak Akses Sudo**: Diperlukan untuk restart container atau mengelola network socket.
 
 ### Struktur Direktori Proyek
 ```text
@@ -172,26 +172,30 @@ sudo -u postgres psql -c "CREATE DATABASE psm OWNER appuser;"
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE psm TO appuser;"
 ```
 
-### Langkah 3: Konfigurasikan Prometheus Snap untuk Scrape Telegraf
-Edit konfigurasi Prometheus Snap di server host:
+### Langkah 3: Konfigurasikan Prometheus Docker untuk Scrape Telegraf
+Buka file konfigurasi `prometheus.yml` yang di-mount ke container Prometheus Docker Anda (misal `/opt/prometheus/prometheus.yml`, `~/prometheus/prometheus.yml`, atau direktori volume Prometheus terkait):
 ```bash
-sudo nano /var/snap/prometheus/current/prometheus.yml
+sudo nano /opt/prometheus/prometheus.yml
 ```
-Tambahkan job `iot_heatpress` di bawah blok `scrape_configs`:
+Tambahkan job `iot_heatpress` di bawah blok `scrape_configs` (gunakan IP LAN `192.168.25.101` atau `host.docker.internal` agar container Prometheus dapat menjangkau Telegraf di host):
 ```yaml
 scrape_configs:
   - job_name: 'iot_heatpress'
     scrape_interval: 5s
     scrape_timeout: 4s
     static_configs:
-      - targets: ['127.0.0.1:9273']
+      - targets: ['192.168.25.101:9273']
         labels:
           environment: 'homelab'
           service: 'heatpress_iot'
 ```
-Simpan file (`Ctrl+O`, `Enter`, `Ctrl+X`), lalu restart Prometheus Snap:
+Simpan file, lalu reload atau restart container Prometheus Docker Anda:
 ```bash
-sudo systemctl restart snap.prometheus.prometheus
+# Opsi A: Restart container Prometheus Docker
+docker restart <nama_container_prometheus>
+
+# Opsi B: Reload konfigurasi secara realtime via HTTP (jika flag --web.enable-lifecycle aktif)
+curl -X POST http://192.168.25.101:9001/-/reload
 ```
 Verifikasi target aktif di browser: `http://192.168.25.101:9001/targets` (akan berstatus UP setelah Telegraf dijalankan).
 

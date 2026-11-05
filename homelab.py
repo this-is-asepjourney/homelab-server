@@ -59,7 +59,7 @@ def cmd_status(args):
         ("PostgreSQL Server", 5432, "tcp"),
         ("MySQL Server (Stock)", 3306, "tcp"),
         ("Grafana Utama Homelab", 3001, "http", f"http://{host}:3001/api/health"),
-        ("Prometheus Snap Server", 9001, "http", f"http://{host}:9001/-/ready"),
+        ("Prometheus Server (Docker)", 9001, "http", f"http://{host}:9001/-/ready"),
         ("Uptime Kuma", 3002, "tcp"),
         ("Vaultwarden", 8080, "tcp"),
         ("Cockpit Web Console", 9090, "tcp"),

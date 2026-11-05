@@ -3,7 +3,7 @@
 # ║                                                                              ║
 # ║  KONSEP: "MENGGUNAKAN LAYANAN YANG SUDAH TERINSTALL DI SERVER"               ║
 # ║  - Menggunakan Grafana Utama yang sudah aktif       -> 192.168.25.101:3001   ║
-# ║  - Menggunakan Prometheus Snap yang sudah aktif     -> 192.168.25.101:9001   ║
+# ║  - Menggunakan Prometheus Docker yang sudah aktif   -> 192.168.25.101:9001   ║
 # ║  - Menggunakan Mosquitto MQTT yang sudah aktif      -> 192.168.25.101:1883   ║
 # ║  - Menggunakan PostgreSQL Server yang sudah aktif   -> 192.168.25.101:5432   ║
 # ║  - Menggunakan MySQL Server yang sudah aktif        -> 192.168.25.101:3306   ║

@@ -11,7 +11,7 @@ Server telah memiliki layanan-layanan inti yang berjalan di level host atau dock
 | Kategori Infrastruktur | Status Eksisting di Server | Alamat Akses dari Container | Digunakan Oleh Proyek |
 | :--- | :--- | :--- | :--- |
 | **Grafana Dashboard** | Port `3001` (Docker Utama) | `http://host.docker.internal:3001` | IoT Dashboard (Web Hub Proxy & Embed) |
-| **Prometheus Metrics** | Port `9001` (Snap Service) | `http://host.docker.internal:9001` | IoT API & PSM Server Monitor |
+| **Prometheus Metrics**| Port `9001` (Docker Container)| `http://host.docker.internal:9001` | IoT API & PSM Server Monitor |
 | **Mosquitto MQTT** | Port `1883` (Host Daemon) | `192.168.25.101:1883` | Telegraf IoT & ESP32 Fleet |
 | **PostgreSQL Server** | Port `5432` (Host Daemon) | `192.168.25.101:5432` | PSM API & Agent |
 | **MySQL Database** | Port `3306` (Host Daemon) | `192.168.25.101:3306` | Stock UMKM & Core Database |
@@ -100,7 +100,7 @@ docker compose down
 
 ## 5. Integrasi ke Prometheus & Grafana Eksisting
 
-### Langkah 1: Hubungkan Prometheus Snap (:9001) ke Telegraf (:9273)
+### Langkah 1: Hubungkan Prometheus Docker (:9001) ke Telegraf (:9273)
 
 Tambahkan blok job scrape berikut ke konfigurasi Prometheus eksisting di server (misal `/var/snap/prometheus/current/prometheus.yml`):
 
