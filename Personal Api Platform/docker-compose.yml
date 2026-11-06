@@ -1,0 +1,32 @@
+services:
+  pap-api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: pap-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${HOST_IP:-192.168.25.101}:${PORT:-8000}:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    mem_limit: 256m
+    cpus: 0.50
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - -fsS
+        - http://127.0.0.1:8000/health
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - pap-network
+
+networks:
+  pap-network:
+    driver: bridge
+

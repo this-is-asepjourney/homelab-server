@@ -1,0 +1,21 @@
+{
+  "name": "personal-server-manager-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Personal Server Manager (PSM) - Self-hosted Multi-Server Management Platform",
+  "scripts": {
+    "web:dev": "npm --prefix apps/web run dev",
+    "web:build": "npm --prefix apps/web run build",
+    "web:start": "npm --prefix apps/web run start",
+    "api:dev": "python -m uvicorn apps.api.app.main:app --reload --port 8000",
+    "agent:run": "python -m apps.agent.app.main"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
+

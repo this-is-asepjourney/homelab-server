@@ -1,0 +1,2 @@
+"""Projects registry module."""
+

@@ -1,0 +1,44 @@
+groups:
+  # ────────────────────────────────────────────────────
+  # Grup: Device Availability Alerts
+  # Notifikasi ketika device IoT tidak mengirim data
+  # ────────────────────────────────────────────────────
+  - name: device_availability
+    interval: 1m
+    rules:
+      # Device dianggap "down" jika tidak ada data sysctrl selama 10 menit
+      - alert: DeviceOffline
+        expr: |
+          (time() - max by (MAC, MCID) (last_over_time(sysctrl[24h]) * 0 + timestamp(sysctrl))) > 600
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Device IoT offline"
+          description: "Device {{ $labels.MAC }} (MCID: {{ $labels.MCID }}) tidak mengirim data lebih dari 10 menit."
+
+      # Device dianggap "critical down" jika tidak ada data sysctrl selama 1 jam
+      - alert: DeviceDownCritical
+        expr: |
+          (time() - max by (MAC, MCID) (last_over_time(sysctrl[24h]) * 0 + timestamp(sysctrl))) > 3600
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Device IoT mati lebih dari 1 jam"
+          description: "Device {{ $labels.MAC }} (MCID: {{ $labels.MCID }}) tidak mengirim data lebih dari 1 jam!"
+
+  # ────────────────────────────────────────────────────
+  # Grup: Recording Rules — Query Optimization
+  # Pre-compute query yang sering dipakai agar lebih cepat
+  # ────────────────────────────────────────────────────
+  - name: recording_rules
+    interval: 30s
+    rules:
+      # Jumlah device yang aktif dalam 5 menit terakhir
+      - record: iot:devices_online:count
+        expr: count(count by (MAC) (count_over_time(sysctrl[5m])))
+
+      # Jumlah total event cnt per device dalam 1 jam
+      - record: iot:event_cnt_total:sum_1h
+        expr: sum by (MAC, MCID) (increase(event_cnt[1h]))

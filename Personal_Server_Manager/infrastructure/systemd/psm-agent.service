@@ -1,0 +1,18 @@
+[Unit]
+Description=Personal Server Manager (PSM) Agent
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/psm/agent
+EnvironmentFile=/opt/psm/agent/agent.env
+ExecStart=/usr/bin/python3 -m apps.agent.app.main
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+

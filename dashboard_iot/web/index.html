@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Heatpress IoT Fleet Hub — Monitoring & Management</title>
+  <meta name="description" content="Dashboard manajemen dan monitoring armada mesin heat press IoT secara real-time. Hirarki model: HPM 55, AF-450, APM-LOGO & Coming Soon." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app-container">
+    <aside class="sidebar glass-panel">
+      <div class="sidebar-header">
+        <div class="logo-icon-wrap" style="background: linear-gradient(135deg, #ef4444, #f59e0b);">
+          <i class='bx bx-flame logo-icon'></i>
+        </div>
+        <div>
+          <div class="logo-text">Heatpress Hub</div>
+          <div class="logo-subtitle">IoT Fleet Monitoring</div>
+        </div>
+      </div>
+      <div class="sidebar-divider"></div>
+      <nav class="sidebar-nav">
+        <div class="nav-section-label">Hirarki & Overview</div>
+        <a href="#" class="nav-item active" id="nav-hierarchy" onclick="app.showPage('hierarchy'); return false;">
+          <i class='bx bx-sitemap'></i>
+          <span>Armada Heatpress</span>
+        </a>
+
+        <div class="nav-section-label">Monitoring Dashboard</div>
+        <a href="#" class="nav-item" id="nav-dash-universal" onclick="app.switchToDashboard('universal'); return false;">
+          <i class='bx bx-globe' style="color:#6366f1;"></i>
+          <span>Dashboard Universal</span>
+          <span class="sidebar-badge" style="background:rgba(99,102,241,0.15);color:#6366f1;font-size:10px;padding:2px 6px;border-radius:100px;font-weight:700;">Semua</span>
+        </a>
+        <div class="sub-nav-group">
+          <a href="#" class="sub-nav-item" id="subnav-dash-hpm" onclick="app.switchToDashboard('HPM 55'); return false;">
+            <span class="sub-nav-label"><i class='bx bx-flame' style="color:#ef4444;"></i> Dashboard HPM 55</span>
+            <span class="sub-nav-count" id="subnav-count-hpm">1</span>
+          </a>
+          <a href="#" class="sub-nav-item" id="subnav-dash-af" onclick="app.switchToDashboard('AF-450'); return false;">
+            <span class="sub-nav-label"><i class='bx bx-layer' style="color:#0ea5e9;"></i> Dashboard AF-450</span>
+            <span class="sub-nav-count" id="subnav-count-af">1</span>
+          </a>
+          <a href="#" class="sub-nav-item" id="subnav-dash-apm" onclick="app.switchToDashboard('APM-LOGO'); return false;">
+            <span class="sub-nav-label"><i class='bx bx-purchase-tag-alt' style="color:#f59e0b;"></i> Dashboard APM-LOGO</span>
+            <span class="sub-nav-count" id="subnav-count-apm">1</span>
+          </a>
+        </div>
+
+        <div class="nav-section-label">Manajemen & Data</div>
+        <a href="#" class="nav-item" id="nav-devices" onclick="app.showPage('devices', true); return false;">
+          <i class='bx bx-devices'></i>
+          <span>Device Manager</span>
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="system-status" id="pap-status" style="margin-bottom:8px;">
+          <div class="sys-dot" id="pap-status-dot" style="background:#3b82f6;box-shadow:0 0 8px rgba(59,130,246,0.6);"></div>
+          <div class="sys-status-text">
+            <span id="pap-status-label">PAP Main API</span>
+            <span class="sys-status-sub" id="pap-status-sub">Connecting...</span>
+          </div>
+        </div>
+        <div class="system-status" id="system-status">
+          <div class="sys-dot" id="sys-status-dot"></div>
+          <div class="sys-status-text">
+            <span id="sys-status-label">Checking...</span>
+            <span class="sys-status-sub">Prometheus Status</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+
+      <!-- PAGE 1: HIERARCHY OVERVIEW (ARMADA HEATPRESS) -->
+      <div id="page-hierarchy" class="page active">
+        <div class="top-header">
+          <div class="header-title">
+            <h1><i class='bx bx-sitemap'></i> Armada Mesin Heatpress</h1>
+            <p>Struktur Hirarki Armada: <span class="highlight-text">Heatpress</span> &bull; 3 Model Aktif &bull; 1 Model Pengembangan (Coming Soon)</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-secondary" onclick="app.syncWithPap()" title="Sinkronkan armada dengan Personal API Platform (API Utama)">
+              <i class='bx bx-cloud-upload' id="pap-sync-icon-h"></i>
+              <span>Sync PAP API</span>
+            </button>
+            <button class="btn btn-secondary" onclick="app.syncFromPrometheus()" title="Sinkronkan dengan data aktif Prometheus">
+              <i class='bx bx-sync' id="sync-icon-h"></i>
+              <span>Sync Prometheus</span>
+            </button>
+            <button class="btn btn-secondary" onclick="app.fetchAll(false)" title="Refresh Data">
+              <i class='bx bx-refresh' id="refresh-icon-h"></i>
+              <span>Refresh</span>
+            </button>
+            <button class="btn btn-primary" onclick="app.switchToDashboard('universal')" title="Buka Dashboard Universal (Monitoring Seluruh Armada)">
+              <i class='bx bx-globe'></i>
+              <span>Dashboard Universal</span>
+            </button>
+            <button class="btn btn-primary" onclick="app.openModal('add')">
+              <i class='bx bx-plus'></i>
+              <span>Tambah Device</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Hierarchy Hero Banner -->
+        <div class="hierarchy-hero">
+          <div class="hierarchy-hero-info">
+            <div class="hierarchy-hero-icon">
+              <i class='bx bx-flame'></i>
+            </div>
+            <div>
+              <div class="hierarchy-hero-title">
+                Grup Utama: Heatpress
+                <span class="hierarchy-category-tag">Fleet Root</span>
+              </div>
+              <div class="hierarchy-hero-desc">
+                Monitoring terintegrasi sensor suhu (PV/SV), siklus penekanan, dan waktu operasional per model mesin.
+              </div>
+            </div>
+          </div>
+          <div class="hierarchy-stats-chips">
+            <div class="stat-chip">
+              <i class='bx bx-check-shield'></i>
+              <div>Status: <strong>Armada Aktif</strong></div>
+            </div>
+            <div class="stat-chip">
+              <i class='bx bx-cube-alt'></i>
+              <div>Model: <strong id="hero-models-count">3 Model + 1 R&D</strong></div>
+            </div>
+            <div class="stat-chip">
+              <i class='bx bx-devices'></i>
+              <div>Total Unit: <strong id="hero-devices-count">--</strong></div>
+            </div>
+            <div class="stat-chip">
+              <i class='bx bx-signal-5' style="color:#10b981;"></i>
+              <div>Online: <strong id="hero-online-count" style="color:#10b981;">--</strong></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Dynamic Model Cards Container -->
+        <div class="model-cards-grid" id="hierarchyCardsContainer">
+          <div class="loader-container" style="grid-column: 1 / -1; padding: 40px;">
+            <div class="loader"></div>
+            <p>Memuat struktur hirarki model...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- PAGE 2: DEVICE MANAGER -->
+      <div id="page-devices" class="page">
+        <div class="top-header">
+          <div class="header-title">
+            <h1><i class='bx bx-devices'></i> Device Manager</h1>
+            <p>Mapping <span class="highlight-text">MAC Address</span> ke <span class="highlight-text">Machine ID (MCID)</span> berdasarkan Hirarki Model</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-secondary" onclick="app.syncFromPrometheus()" title="Sinkronkan dengan data aktif Prometheus">
+              <i class='bx bx-sync' id="sync-icon"></i>
+              <span>Sync Prometheus</span>
+            </button>
+            <button class="btn btn-secondary" onclick="app.fetchAll(false)" title="Refresh">
+              <i class='bx bx-refresh' id="refresh-icon"></i>
+              <span>Refresh</span>
+            </button>
+            <button class="btn btn-secondary" onclick="app.exportCSV()" title="Export CSV">
+              <i class='bx bx-download'></i>
+              <span>Export CSV</span>
+            </button>
+            <button class="btn btn-primary" onclick="app.openModal('add')">
+              <i class='bx bx-plus'></i>
+              <span>Tambah Device</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card glass-panel">
+            <div class="stat-icon" style="background:rgba(59,130,246,0.15);color:#3b82f6;"><i class='bx bx-devices'></i></div>
+            <div class="stat-details"><h3>Total Device</h3><p id="total-devices-count">--</p></div>
+          </div>
+          <div class="stat-card stat-card--online glass-panel">
+            <span class="stat-pulse-ring"></span>
+            <div class="stat-icon" style="background:rgba(16,185,129,0.15);color:#10b981;"><i class='bx bx-signal-5'></i></div>
+            <div class="stat-details"><h3>Online</h3><p id="online-devices-count">--</p></div>
+          </div>
+          <div class="stat-card glass-panel">
+            <div class="stat-icon" style="background:rgba(100,116,139,0.15);color:#64748b;"><i class='bx bx-signal-1'></i></div>
+            <div class="stat-details"><h3>Offline</h3><p id="offline-devices-count">--</p></div>
+          </div>
+          <div class="stat-card glass-panel">
+            <div class="stat-icon" style="background:rgba(139,92,246,0.15);color:#8b5cf6;"><i class='bx bx-link'></i></div>
+            <div class="stat-details"><h3>Ter-mapping (MCID)</h3><p id="mapped-devices-count">--</p></div>
+          </div>
+          <div class="stat-card glass-panel">
+            <div class="stat-icon" style="background:rgba(245,158,11,0.15);color:#f59e0b;"><i class='bx bx-time-five'></i></div>
+            <div class="stat-details"><h3>Last Updated</h3><p class="stat-time" id="last-updated-time">--</p></div>
+          </div>
+        </div>
+
+        <!-- Model Filter Pills Bar -->
+        <div class="model-pills-bar" id="modelPillsBar">
+          <button class="model-pill active" id="pill-all" onclick="app.setTableFilterModel('all', this)">
+            <i class='bx bx-layer-plus'></i> Semua Heatpress <span class="model-pill-badge" id="pill-all-count">--</span>
+          </button>
+          <button class="model-pill model-pill--hpm" id="pill-hpm" onclick="app.setTableFilterModel('HPM 55', this)">
+            <i class='bx bx-flame'></i> HPM 55 <span class="model-pill-badge" id="pill-hpm-count">--</span>
+          </button>
+          <button class="model-pill model-pill--af" id="pill-af" onclick="app.setTableFilterModel('AF-450', this)">
+            <i class='bx bx-layer'></i> AF-450 <span class="model-pill-badge" id="pill-af-count">--</span>
+          </button>
+          <button class="model-pill model-pill--apm" id="pill-apm" onclick="app.setTableFilterModel('APM-LOGO', this)">
+            <i class='bx bx-purchase-tag-alt'></i> APM-LOGO <span class="model-pill-badge" id="pill-apm-count">--</span>
+          </button>
+          <button class="model-pill model-pill--comingsoon" id="pill-comingsoon" onclick="app.setTableFilterModel('comingsoon', this)">
+            <i class='bx bx-time-five'></i> Coming Soon <span class="model-pill-badge" id="pill-comingsoon-count">0</span>
+          </button>
+        </div>
+
+        <div class="table-container glass-panel">
+          <div class="table-header">
+            <div class="table-controls-left">
+              <h2 class="table-title"><i class='bx bx-list-ul'></i> Daftar Device</h2>
+            </div>
+            <div class="table-controls">
+              <div class="filter-select-wrap">
+                <i class='bx bx-filter-alt'></i>
+                <select id="statusFilter" onchange="app.applyFilters()" class="filter-select">
+                  <option value="all">Semua Status</option>
+                  <option value="online">Online</option>
+                  <option value="offline">Offline</option>
+                </select>
+              </div>
+              <div class="search-box">
+                <i class='bx bx-search'></i>
+                <input type="text" id="searchInput" placeholder="Cari MAC, MCID, nama, model..." oninput="app.applyFilters()" autocomplete="off" />
+              </div>
+            </div>
+          </div>
+
+          <div class="info-banner" id="mapping-info-banner">
+            <i class='bx bx-info-circle'></i>
+            <span>
+              <strong>Hirarki Heatpress Aktif:</strong>
+              Perangkat dikelompokkan ke model <strong>HPM 55</strong>, <strong>AF-450</strong>, dan <strong>APM-LOGO</strong>. Pastikan Machine ID (MCID) terisi sesuai mesin fisik.
+            </span>
+            <button class="btn-dismiss" onclick="document.getElementById('mapping-info-banner').style.display='none'">
+              <i class='bx bx-x'></i>
+            </button>
+          </div>
+
+          <div class="table-responsive">
+            <table id="deviceTable">
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Model / Kategori</th>
+                  <th>MAC Address</th>
+                  <th>Machine ID <span class="th-badge">MCID</span></th>
+                  <th>Nama Device</th>
+                  <th>Tipe Hardware</th>
+                  <th>Lokasi</th>
+                  <th>Terakhir Aktif</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="deviceTableBody">
+                <tr><td colspan="9" class="text-center"><div class="loader-container"><div class="loader"></div><p>Memuat data device...</p></div></td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="table-footer">
+            <span id="device-count-label" class="text-muted"></span>
+            <span class="auto-refresh-label">Auto-refresh: <strong id="refresh-countdown">30</strong>s</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- PAGE 3: LIVE MONITORING (DASHBOARD CENTER) -->
+      <div id="page-grafana" class="page">
+        <div class="top-header">
+          <div class="header-title">
+            <h1 id="grafana-header-title"><i class='bx bx-globe'></i> Dashboard Universal Armada</h1>
+            <p id="grafana-header-desc">Monitoring terpadu seluruh armada mesin Heatpress (HPM 55, AF-450, APM-LOGO) secara real-time</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-secondary" onclick="app.showPage('hierarchy')">
+              <i class='bx bx-arrow-back'></i> Kembali ke Armada
+            </button>
+            <button class="btn btn-secondary" onclick="app.refreshGrafanaIframe()" title="Refresh Dashboard">
+              <i class='bx bx-refresh' id="grafana-refresh-btn-icon"></i> Refresh Frame
+            </button>
+            <a id="grafana-direct-link" href="#" target="_blank" class="btn btn-secondary" title="Buka dashboard di Grafana (Tab Baru)">
+              <i class='bx bx-link-external'></i> Tab Grafana
+            </a>
+          </div>
+        </div>
+
+        <div class="grafana-page-card glass-panel">
+          <!-- Model Dashboard Tabs Switcher -->
+          <div class="dashboard-tabs-bar" id="dashboardTabsBar">
+            <button class="dash-tab dash-tab--universal active" id="tab-dash-universal" onclick="app.switchToDashboard('universal')">
+              <i class='bx bx-globe'></i>
+              <span>Dashboard Universal</span>
+              <span class="dash-tab-badge">Semua Model</span>
+            </button>
+            <button class="dash-tab dash-tab--hpm" id="tab-dash-hpm" onclick="app.switchToDashboard('HPM 55')">
+              <i class='bx bx-flame'></i>
+              <span>Dashboard HPM 55</span>
+              <span class="dash-tab-badge" id="badge-count-hpm">1 Unit</span>
+            </button>
+            <button class="dash-tab dash-tab--af" id="tab-dash-af" onclick="app.switchToDashboard('AF-450')">
+              <i class='bx bx-layer'></i>
+              <span>Dashboard AF-450</span>
+              <span class="dash-tab-badge" id="badge-count-af">1 Unit</span>
+            </button>
+            <button class="dash-tab dash-tab--apm" id="tab-dash-apm" onclick="app.switchToDashboard('APM-LOGO')">
+              <i class='bx bx-purchase-tag-alt'></i>
+              <span>Dashboard APM-LOGO</span>
+              <span class="dash-tab-badge" id="badge-count-apm">1 Unit</span>
+            </button>
+          </div>
+
+          <!-- Controls & Device Filter Toolbar -->
+          <div class="grafana-device-selector">
+            <div id="universal-model-filter-group" style="display:flex;gap:8px;align-items:center;">
+              <label for="grafana-model-select"><i class='bx bx-filter-alt'></i> Model:</label>
+              <div class="grafana-select-wrap" style="min-width:200px;">
+                <select id="grafana-model-select" onchange="app.onGrafanaModelChange(this.value)" class="filter-select grafana-select">
+                  <option value="all">Semua Model (Universal Fleet)</option>
+                  <option value="HPM 55">HPM 55 (Pneumatic)</option>
+                  <option value="AF-450">AF-450 (Auto Flat)</option>
+                  <option value="APM-LOGO">APM-LOGO (Auto Logo)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="flex:1;min-width:320px;display:flex;gap:8px;align-items:center;">
+              <label for="grafana-device-select"><i class='bx bx-chip'></i> Filter Device:</label>
+              <div class="grafana-select-wrap" style="flex:1;">
+                <select id="grafana-device-select" onchange="app.onDeviceSelectChange(this.value)" class="filter-select grafana-select">
+                  <option value="all">🌐 Pantau Seluruh Mesin (All)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="active-dash-chip" id="activeDashChip">
+              <span class="status-dot online"></span>
+              <span id="activeDashSummaryText">Memuat armada...</span>
+            </div>
+          </div>
+
+          <div class="grafana-embed-container" id="grafana-embed-container">
+            <div class="grafana-placeholder" id="grafana-placeholder" style="display:none;">
+              <i class='bx bx-line-chart'></i>
+              <p>Pilih device di atas untuk menampilkan dashboard Grafana</p>
+            </div>
+            <div class="loader-container grafana-loader" id="grafana-page-loader">
+              <div class="loader"></div><p>Memuat Grafana Dashboard...</p>
+            </div>
+            <iframe id="grafanaPageIframe" src="" frameborder="0" allowfullscreen style="display:none;width:100%;height:100%;border:0;" onload="app.onGrafanaPageLoad()"></iframe>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- MODAL: Add/Edit Device -->
+  <div class="modal-overlay" id="deviceModal" onclick="if(event.target===this) app.closeModal()">
+    <div class="modal-content glass-modal">
+      <div class="modal-header">
+        <div class="modal-title-row">
+          <i class='bx bx-plus-circle modal-title-icon' id="modal-icon"></i>
+          <h2 id="modalTitle">Tambah Device</h2>
+        </div>
+        <button class="btn-close" onclick="app.closeModal()"><i class='bx bx-x'></i></button>
+      </div>
+      <form id="deviceForm" onsubmit="app.handleFormSubmit(event)" novalidate>
+        <input type="hidden" id="formMode" value="add" />
+        <div class="modal-body">
+
+          <!-- Hierarchy Selection Presets -->
+          <div class="form-group">
+            <label>Model Mesin dalam Hirarki Heatpress <span class="required">*</span></label>
+            <div class="model-chips-container">
+              <button type="button" class="model-select-chip selected" id="chip-hpm" onclick="app.selectModelPreset('HPM 55')">
+                <i class='bx bx-flame'></i> HPM 55
+              </button>
+              <button type="button" class="model-select-chip" id="chip-af" onclick="app.selectModelPreset('AF-450')">
+                <i class='bx bx-layer'></i> AF-450
+              </button>
+              <button type="button" class="model-select-chip" id="chip-apm" onclick="app.selectModelPreset('APM-LOGO')">
+                <i class='bx bx-purchase-tag-alt'></i> APM-LOGO
+              </button>
+              <button type="button" class="model-select-chip" id="chip-comingsoon" onclick="app.selectModelPreset('comingsoon')">
+                <i class='bx bx-time-five'></i> Coming Soon
+              </button>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="deviceCategory">Kategori Hirarki</label>
+              <div class="input-with-icon">
+                <i class='bx bx-sitemap'></i>
+                <input type="text" id="deviceCategory" value="Heatpress" readonly style="background:rgba(148,163,184,0.1);cursor:not-allowed;" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="deviceModel">Tipe Model <span class="required">*</span></label>
+              <div class="input-with-icon">
+                <i class='bx bx-cube'></i>
+                <input type="text" id="deviceModel" placeholder="HPM 55 / AF-450 / APM-LOGO" autocomplete="off" />
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="macAddress">MAC Address <span class="required">*</span></label>
+            <div class="input-with-icon">
+              <i class='bx bx-chip'></i>
+              <input type="text" id="macAddress" placeholder="AA:BB:CC:DD:EE:FF" maxlength="17" autocomplete="off" spellcheck="false" />
+            </div>
+            <span class="form-error" id="mac-error"></span>
+            <span class="form-help">Identifier unik perangkat IoT ESP32 (dari firmware hardware)</span>
+          </div>
+
+          <div class="form-group mcid-group">
+            <label for="deviceMcid">
+              Machine ID (MCID)
+              <span class="mcid-badge-label">Kunci Mapping</span>
+            </label>
+            <div class="input-with-icon">
+              <i class='bx bx-link'></i>
+              <input type="text" id="deviceMcid" placeholder="Contoh: HP-55-01, AF-01, APM-01" autocomplete="off" />
+            </div>
+            <span class="form-help">ID mesin fisik tempat device ini dipasang. Harus sama dengan MCID yang dikirim via MQTT.</span>
+          </div>
+
+          <div class="form-group">
+            <label for="deviceName">Nama Device <span class="required">*</span></label>
+            <div class="input-with-icon">
+              <i class='bx bx-rename'></i>
+              <input type="text" id="deviceName" placeholder="Contoh: Heatpress Line 1" autocomplete="off" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="deviceType">Tipe Hardware</label>
+              <div class="input-with-icon">
+                <i class='bx bx-microchip'></i>
+                <input type="text" id="deviceType" placeholder="ESP32" value="ESP32" autocomplete="off" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="deviceLocation">Lokasi Fisik</label>
+              <div class="input-with-icon">
+                <i class='bx bx-map-pin'></i>
+                <input type="text" id="deviceLocation" placeholder="Lini Produksi A" autocomplete="off" />
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="deviceDescription">Catatan / Spesifikasi Tambahan</label>
+            <div class="input-with-icon">
+              <i class='bx bx-note'></i>
+              <input type="text" id="deviceDescription" placeholder="Catatan opsional" autocomplete="off" />
+            </div>
+          </div>
+
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="app.closeModal()">
+            <i class='bx bx-x'></i> Batal
+          </button>
+          <button type="submit" class="btn btn-primary" id="saveButton">
+            <i class='bx bx-save'></i> Simpan Device
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Grafana Fullscreen -->
+  <div class="modal-overlay" id="grafanaModal" onclick="if(event.target===this) app.closeGrafanaModal()">
+    <div class="modal-content glass-modal grafana-modal">
+      <div class="modal-header">
+        <div class="modal-title-row">
+          <i class='bx bx-line-chart modal-title-icon' style="color:#f59e0b;"></i>
+          <h2 id="grafanaModalTitle">Live Dashboard</h2>
+        </div>
+        <div class="modal-header-actions">
+          <a id="grafana-open-link" href="#" target="_blank" class="btn btn-secondary btn-sm" title="Buka di tab baru">
+            <i class='bx bx-link-external'></i>
+          </a>
+          <button class="btn-close" onclick="app.closeGrafanaModal()"><i class='bx bx-x'></i></button>
+        </div>
+      </div>
+      <div class="grafana-body modal-body">
+        <div class="loader-container" id="grafanaLoader">
+          <div class="loader"></div>
+          <p>Memuat dashboard Grafana...</p>
+        </div>
+        <iframe id="grafanaIframe" src="" frameborder="0" allowfullscreen onload="app.onGrafanaLoad()"></iframe>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toastContainer" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>

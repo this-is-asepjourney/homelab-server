@@ -190,43 +190,37 @@ setup_env() {
 }
 
 # ------------------------------------------------------------------------------
-# 6. SINKRONISASI SOURCE CODE MODUL (SUBMODULES)
+# 6. VERIFIKASI STRUKTUR MONOREPO TERPADU
 # ------------------------------------------------------------------------------
-check_and_sync_submodules() {
-    log_info "Memeriksa source code modul (Personal_Server_Manager, Personal Api Platform, dashboard_iot)..."
+verify_monorepo_modules() {
+    log_info "Memeriksa kelengkapan file modul (Monorepo)..."
 
-    # Inisialisasi git submodule jika git tersedia
-    if command -v git &>/dev/null && [ -d ".git" ]; then
-        log_info "Menjalankan git submodule update --init --recursive..."
-        git submodule update --init --recursive || true
-    fi
+    local missing=0
 
-    # Fallback jika folder kosong atau submodule belum ditarik
-    if [ ! -d "Personal_Server_Manager/infrastructure" ]; then
-        log_warn "Source code Personal_Server_Manager belum lengkap. Mengunduh repository..."
-        rm -rf Personal_Server_Manager
-        git clone https://github.com/this-is-asepjourney/personal_server_manager.git Personal_Server_Manager
-        log_success "Personal_Server_Manager berhasil diunduh."
+    if [ ! -d "Personal_Server_Manager/infrastructure/docker" ]; then
+        log_error "Direktori Personal_Server_Manager/infrastructure/docker tidak ditemukan!"
+        missing=1
     else
         log_success "Personal_Server_Manager siap."
     fi
 
     if [ ! -d "Personal Api Platform/docker" ]; then
-        log_warn "Source code Personal Api Platform belum lengkap. Mengunduh repository..."
-        rm -rf "Personal Api Platform"
-        git clone https://github.com/this-is-asepjourney/personal_api_platform.git "Personal Api Platform"
-        log_success "Personal Api Platform berhasil diunduh."
+        log_error "Direktori Personal Api Platform/docker tidak ditemukan!"
+        missing=1
     else
         log_success "Personal Api Platform siap."
     fi
 
     if [ ! -d "dashboard_iot/api" ]; then
-        log_warn "Source code dashboard_iot belum lengkap. Mengunduh repository..."
-        rm -rf dashboard_iot
-        git clone https://github.com/this-is-asepjourney/dashboard_iot.git dashboard_iot
-        log_success "dashboard_iot berhasil diunduh."
+        log_error "Direktori dashboard_iot/api tidak ditemukan!"
+        missing=1
     else
         log_success "dashboard_iot siap."
+    fi
+
+    if [ "$missing" -eq 1 ]; then
+        log_error "Beberapa modul tidak lengkap. Pastikan repository sudah di-pull sempurna."
+        exit 1
     fi
 }
 
@@ -354,7 +348,7 @@ main() {
     configure_prometheus
     setup_postgres_db
     setup_env
-    check_and_sync_submodules
+    verify_monorepo_modules
     deploy_containers
     verify_deployment
     import_grafana_dashboards

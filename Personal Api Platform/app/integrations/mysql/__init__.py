@@ -1,0 +1,120 @@
+"""Controlled MySQL read-only adapter for Stock UMKM and approved schema inspection."""
+
+import re
+from typing import Any
+
+from sqlalchemy import create_engine, inspect, text
+
+from app.core.config import get_settings
+from app.core.exceptions import BadRequestError, PermissionDeniedError
+
+IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+class MySQLReadOnlyAdapter:
+    """Least-privilege MySQL read-only adapter (rejects root runtime identity and non-allowlisted tables)."""
+
+    def __init__(
+        self,
+        host: str | None = None,
+        port: int | None = None,
+        database_name: str | None = None,
+        username: str | None = None,
+        secret_reference: str = "STOCK_DB_PASSWORD",
+        allowed_tables: list[str] | None = None,
+    ) -> None:
+        settings = get_settings()
+        self.host = host or settings.STOCK_DB_HOST
+        self.port = port or settings.STOCK_DB_PORT
+        self.database_name = database_name or settings.STOCK_DB_NAME
+        self.username = username or settings.STOCK_DB_USER
+        self.secret_reference = secret_reference
+        self.allowed_tables = set(allowed_tables or ["products", "inventories", "categories"])
+
+        if self.username.strip().lower() == "root":
+            raise PermissionDeniedError(
+                message="MySQL adapter refuses to run with 'root' database identity; use a restricted reader account.",
+                code="PRIVILEGED_DB_USER_FORBIDDEN",
+            )
+
+    def _build_url(self) -> str:
+        settings = get_settings()
+        password = settings.resolve_secret_reference(self.secret_reference) or ""
+        return f"mysql+pymysql://{self.username}:{password}@{self.host}:{self.port}/{self.database_name}"
+
+    def check_health(self) -> dict[str, Any]:
+        settings = get_settings()
+        try:
+            eng = create_engine(
+                self._build_url(),
+                pool_pre_ping=True,
+                connect_args={"connect_timeout": settings.DB_CONNECT_TIMEOUT},
+            )
+            with eng.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            eng.dispose()
+            return {"reachable": True, "engine": "mysql", "database": self.database_name}
+        except Exception as exc:
+            return {
+                "reachable": False,
+                "engine": "mysql",
+                "database": self.database_name,
+                "reason": type(exc).__name__,
+            }
+
+    def get_approved_schema(self, table_name: str | None = None) -> dict[str, Any]:
+        if table_name is not None:
+            if not IDENTIFIER_RE.match(table_name):
+                raise BadRequestError(
+                    message="Invalid table identifier format",
+                    code="INVALID_TABLE_IDENTIFIER",
+                )
+            if table_name not in self.allowed_tables:
+                raise PermissionDeniedError(
+                    message=f"Table '{table_name}' is not in the approved schema allowlist",
+                    code="TABLE_NOT_ALLOWLISTED",
+                )
+            target_tables = [table_name]
+        else:
+            target_tables = sorted(self.allowed_tables)
+
+        settings = get_settings()
+        try:
+            eng = create_engine(
+                self._build_url(),
+                connect_args={"connect_timeout": settings.DB_CONNECT_TIMEOUT},
+            )
+            inspector = inspect(eng)
+            available = set(inspector.get_table_names())
+            tables_meta: dict[str, list[dict[str, Any]]] = {}
+            for tbl in target_tables:
+                if tbl in available:
+                    cols = inspector.get_columns(tbl)
+                    tables_meta[tbl] = [
+                        {
+                            "name": c["name"],
+                            "type": str(c["type"]),
+                            "nullable": bool(c.get("nullable", True)),
+                        }
+                        for c in cols
+                    ]
+                else:
+                    tables_meta[tbl] = []
+            eng.dispose()
+            return {
+                "engine": "mysql",
+                "database": self.database_name,
+                "allowed_tables": sorted(self.allowed_tables),
+                "tables": tables_meta,
+            }
+        except (BadRequestError, PermissionDeniedError):
+            raise
+        except Exception:
+            return {
+                "engine": "mysql",
+                "database": self.database_name,
+                "allowed_tables": sorted(self.allowed_tables),
+                "tables": {tbl: [] for tbl in target_tables},
+                "status": "offline_metadata_only",
+            }
+

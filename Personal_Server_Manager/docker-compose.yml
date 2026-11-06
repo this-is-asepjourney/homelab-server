@@ -1,0 +1,123 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.web
+    container_name: psm-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-3005}:3005"
+    environment:
+      - INTERNAL_API_URL=http://api:8000
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-}
+      - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL:-}
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - psm-network
+
+  api:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.api
+    container_name: psm-api
+    restart: unless-stopped
+    env_file:
+      - .env.example
+    ports:
+      - "${API_PORT:-8001}:8000"
+    environment:
+      # Connects to existing PostgreSQL (192.168.25.101:5432 / 100.106.63.90:5432) as appuser
+      - POSTGRES_DB=${POSTGRES_DB:-psm}
+      - POSTGRES_USER=${POSTGRES_USER:-appuser}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-admin12345}
+      - POSTGRES_HOST=${POSTGRES_HOST:-192.168.25.101}
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - DATABASE_URL=${PSM_DATABASE_URL:-postgresql+psycopg2://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-admin12345}@${POSTGRES_HOST:-192.168.25.101}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-psm}}
+      - STORAGE_BASE_DIR=/opt/psm
+      - UPLOAD_DIR=/opt/psm/uploads
+      - RELEASE_DIR=/opt/psm/releases
+      - SECRET_KEY=${SECRET_KEY:-b8f36a89270df8417727e025170d1fa78f5f4d8520857ef51fa930f785b96a4e}
+      - ENCRYPTION_MASTER_KEY=${ENCRYPTION_MASTER_KEY:-dGhpcy1pcy1hLXNhbXBsZS1mZXJuZXQta2V5LTMyeS0=}
+      - HOMELAB_AGENT_TOKEN=${HOMELAB_AGENT_TOKEN:-psm_agent_homelab_default_token}
+      - PROMETHEUS_URL=${PROMETHEUS_URL:-http://host.docker.internal:9001}
+      - PAP_API_URL=${PAP_API_URL:-http://192.168.25.101:8000}
+      - PAP_API_KEY=${PAP_API_KEY:-pap_key_psm_control_plane_default_secret_key_2026}
+      - IOT_DASHBOARD_URL=${IOT_DASHBOARD_URL:-http://192.168.25.101:8088}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - psm-storage:/opt/psm
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - psm-network
+
+  agent:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.agent
+    container_name: psm-agent
+    restart: unless-stopped
+    env_file:
+      - .env.example
+    environment:
+      - SERVER_ID=homelab-primary
+      - AGENT_TOKEN=${HOMELAB_AGENT_TOKEN:-psm_agent_homelab_default_token}
+      - CONTROL_PLANE_URL=http://api:8000
+      - PSM_BASE_DIR=/opt/psm
+      - POSTGRES_DB=${POSTGRES_DB:-psm}
+      - POSTGRES_USER=${POSTGRES_USER:-appuser}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-admin12345}
+      - POSTGRES_HOST=${POSTGRES_HOST:-100.106.63.90}
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - psm-storage:/opt/psm
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - psm-network
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: psm-postgres
+    restart: unless-stopped
+    profiles:
+      - local-db
+    env_file:
+      - .env.example
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-psm}
+      POSTGRES_USER: ${POSTGRES_USER:-appuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-admin12345}
+    volumes:
+      - psm-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-appuser} -d $${POSTGRES_DB:-psm} || pg_isready -U psm -d psm"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      psm-network:
+        aliases:
+          - postgres
+          - psm-postgres
+          - db
+
+volumes:
+  psm-postgres:
+  psm-storage:
+
+networks:
+  psm-network:
+    name: psm-network
+    driver: bridge

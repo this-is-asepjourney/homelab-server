@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+# Load alert rules
+rule_files:
+  - "alert_rules.yml"
+
+scrape_configs:
+  - job_name: 'telegraf'
+    static_configs:
+      - targets: ['telegraf:9273']
+    # Label semua metric dari telegraf dengan source=telegraf
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: source
+        replacement: 'telegraf'
