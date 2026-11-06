@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 import os
+import time
 import httpx
 from typing import Dict, Optional, List
 from datetime import datetime, timezone
@@ -755,23 +756,45 @@ PROMETHEUS_CANDIDATE_URLS = [
 # Personal API Platform (Main API / API Utama) configuration
 PAP_API_URL = os.getenv("PAP_API_URL", "http://192.168.25.101:8000")
 PAP_API_KEY = os.getenv("PAP_API_KEY", "pap_key_iot_dashboard_default_secret_key_2026")
-PAP_CANDIDATE_URLS = [
-    "http://127.0.0.1:8000",
+
+def _filter_pap_candidates(urls: List[str]) -> List[str]:
+    """Filter candidate URLs to prevent self-referencing loops (127.0.0.1:8000)."""
+    valid = []
+    for u in urls:
+        if not u:
+            continue
+        cleaned = u.rstrip("/")
+        # Never call port 8000 on localhost / 127.0.0.1 (self container port)
+        if "127.0.0.1:8000" in cleaned or "localhost:8000" in cleaned:
+            continue
+        if cleaned not in valid:
+            valid.append(cleaned)
+    return valid
+
+PAP_CANDIDATE_URLS = _filter_pap_candidates([
+    "http://pap-api:8000",
     PAP_API_URL.rstrip("/"),
-]
+    "http://host.docker.internal:8000",
+])
 
 # Online threshold: device dianggap online jika kirim data dalam N menit terakhir
 ONLINE_THRESHOLD_MINUTES = int(os.getenv("ONLINE_THRESHOLD_MINUTES", "5"))
 
+# Cache & Active URL tracking to ensure ultra-low CPU footprint (< 1%)
+_active_prometheus_url: Optional[str] = None
+_active_pap_url: Optional[str] = None
+
+_online_macs_cache: Optional[set] = None
+_online_macs_cache_ts: float = 0.0
+_ONLINE_CACHE_TTL: float = 10.0  # seconds
+
+_health_cache: Optional[schemas.HealthResponse] = None
+_health_cache_ts: float = 0.0
+_HEALTH_CACHE_TTL: float = 10.0  # seconds
+
+_last_prom_sync_ts: float = 0.0
+
 # Semua metric yang di-scrape dari MQTT via Telegraf.
-# Device dianggap Online jika ADA data dari metric MANAPUN dalam threshold menit.
-# Ini memastikan status web selaras dengan data yang ditampilkan Grafana.
-#
-# PENTING: Telegraf metric_version=2 meng-flatten field menjadi nama metric:
-#   sysctrl   -> sysctrl_STS, sysctrl_STS_raw, dst.
-#   event_cnt -> event_cnt_CUR_CYCLE, event_cnt_DAY, dst.
-#   heatpress -> heatpress_PV, heatpress_SV, heatpress_DAY, dst.
-# Gunakan regex prefix agar cocok dengan semua variant.
 ALL_MQTT_METRICS = "sysctrl_.+|event_cnt_.+|event_handling_.+|machine_time_.+|heatpress_.+"
 
 # Allow CORS for web app
@@ -799,40 +822,56 @@ def get_db():
 # Internal Helpers — Prometheus Queries
 # ─────────────────────────────────────────────
 
-def _query_prometheus(query: str, timeout: float = 2.0):
-    """Execute PromQL query against existing host Prometheus (:9001) or container Prometheus."""
-    req_timeout = httpx.Timeout(timeout, connect=0.5)
-    seen = set()
-    for base in PROMETHEUS_CANDIDATE_URLS:
-        if not base or base in seen:
-            continue
-        seen.add(base)
+def _query_prometheus(query: str, timeout: float = 1.5):
+    """Execute PromQL query against active Prometheus URL or candidate list with connection pooling."""
+    global _active_prometheus_url
+    req_timeout = httpx.Timeout(timeout, connect=0.4)
+
+    # 1. Fast-path: try already resolved active URL
+    if _active_prometheus_url:
         try:
-            response = httpx.get(
-                f"{base}/api/v1/query",
-                params={"query": query},
-                timeout=req_timeout,
-            )
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("status") == "success":
-                    return data.get("data", {}).get("result", [])
+            with httpx.Client(timeout=req_timeout) as client:
+                response = client.get(
+                    f"{_active_prometheus_url}/api/v1/query",
+                    params={"query": query},
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get("status") == "success":
+                        return data.get("data", {}).get("result", [])
+        except Exception:
+            _active_prometheus_url = None
+
+    # 2. Iterate candidates
+    for base in PROMETHEUS_CANDIDATE_URLS:
+        if not base:
+            continue
+        try:
+            with httpx.Client(timeout=req_timeout) as client:
+                response = client.get(
+                    f"{base}/api/v1/query",
+                    params={"query": query},
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get("status") == "success":
+                        _active_prometheus_url = base
+                        return data.get("data", {}).get("result", [])
         except Exception:
             continue
     return []
 
 
-def _get_online_macs() -> set:
+def _get_online_macs(force: bool = False) -> set:
     """
     Return set of MAC addresses yang online.
-    Device dianggap Online jika ada data dari metric MANAPUN (bukan hanya sysctrl)
-    dalam ONLINE_THRESHOLD_MINUTES menit terakhir.
-    Ini memastikan status di web selaras dengan data yang ditampilkan di Grafana —
-    jika Grafana menampilkan data dari device, web juga menampilkan Online.
+    Cached for 10 seconds to avoid slamming Prometheus when web sends concurrent requests.
     """
-    # Cek semua metric MQTT: jika data ada di Prometheus, berarti device Online.
-    # (Telegraf otomatis menghapus metric jika tidak ada update selama 5 menit
-    # berkat 'expiration_interval = "5m"' di telegraf.conf)
+    global _online_macs_cache, _online_macs_cache_ts
+    now = time.time()
+    if not force and _online_macs_cache is not None and (now - _online_macs_cache_ts) < _ONLINE_CACHE_TTL:
+        return _online_macs_cache
+
     query = f'count by (MAC) ({{__name__=~"{ALL_MQTT_METRICS}"}})'
     results = _query_prometheus(query)
     online_macs = set()
@@ -842,6 +881,9 @@ def _get_online_macs() -> set:
             mac = r.get("metric", {}).get("mac", "").upper()
         if mac:
             online_macs.add(mac)
+
+    _online_macs_cache = online_macs
+    _online_macs_cache_ts = now
     return online_macs
 
 
@@ -876,26 +918,42 @@ def _request_pap(
     method: str,
     path: str,
     json_body: Optional[dict] = None,
-    timeout: float = 0.5,
+    timeout: float = 1.0,
 ) -> Optional[httpx.Response]:
     """Send an authenticated request to Personal API Platform (Main API), trying candidate URLs."""
-    req_timeout = httpx.Timeout(timeout, connect=0.25)
-    seen = set()
-    for base in PAP_CANDIDATE_URLS:
-        if not base or base in seen:
-            continue
-        seen.add(base)
-        url = f"{base}{path}"
+    global _active_pap_url
+    req_timeout = httpx.Timeout(timeout, connect=0.4)
+
+    # 1. Fast-path: try active PAP URL if known
+    if _active_pap_url:
         try:
-            resp = httpx.request(
-                method=method,
-                url=url,
-                headers=_pap_headers(),
-                json=json_body,
-                timeout=req_timeout,
-            )
-            if resp.status_code < 500:
-                return resp
+            with httpx.Client(timeout=req_timeout) as client:
+                resp = client.request(
+                    method=method,
+                    url=f"{_active_pap_url}{path}",
+                    headers=_pap_headers(),
+                    json=json_body,
+                )
+                if resp.status_code < 500:
+                    return resp
+        except Exception:
+            _active_pap_url = None
+
+    # 2. Iterate candidates (excluding any self-referencing 127.0.0.1:8000)
+    for base in PAP_CANDIDATE_URLS:
+        if not base or "127.0.0.1:8000" in base or "localhost:8000" in base:
+            continue
+        try:
+            with httpx.Client(timeout=req_timeout) as client:
+                resp = client.request(
+                    method=method,
+                    url=f"{base}{path}",
+                    headers=_pap_headers(),
+                    json=json_body,
+                )
+                if resp.status_code < 500:
+                    _active_pap_url = base
+                    return resp
         except Exception:
             continue
     return None
@@ -912,7 +970,7 @@ def sync_with_pap(db: Session) -> dict:
     pap_reachable = False
     active_pap_url = PAP_API_URL
 
-    resp = _request_pap("GET", "/api/devices/", timeout=2.5)
+    resp = _request_pap("GET", "/api/devices/", timeout=2.0)
     if resp is not None and resp.status_code == 200:
         pap_reachable = True
         active_pap_url = str(resp.request.url).split("/api/devices")[0]
@@ -957,7 +1015,7 @@ def sync_with_pap(db: Session) -> dict:
                                 "location": local_d.location,
                                 "description": local_d.description,
                             },
-                            timeout=2.5,
+                            timeout=2.0,
                         )
                         if push_res is not None and push_res.status_code in (200, 201):
                             pushed_to_pap += 1
@@ -980,31 +1038,37 @@ def sync_with_pap(db: Session) -> dict:
 @app.get("/api/health", response_model=schemas.HealthResponse, tags=["System"])
 def health_check():
     """
-    Health check endpoint. Verifikasi API berjalan, koneksi ke Prometheus (host :9001 / container), dan koneksi ke Personal API Platform (Main API).
+    Health check endpoint with TTL cache.
+    Verifikasi API berjalan, koneksi ke Prometheus (host :9001 / container), dan koneksi ke Personal API Platform (Main API).
     """
+    global _health_cache, _health_cache_ts
+    now = time.time()
+    if _health_cache is not None and (now - _health_cache_ts) < _HEALTH_CACHE_TTL:
+        return _health_cache
+
     prometheus_status = "unreachable"
-    seen_prom = set()
-    for base in PROMETHEUS_CANDIDATE_URLS:
-        if not base or base in seen_prom:
+    check_urls = [_active_prometheus_url] if _active_prometheus_url else PROMETHEUS_CANDIDATE_URLS
+    for base in check_urls:
+        if not base:
             continue
-        seen_prom.add(base)
         try:
-            resp = httpx.get(f"{base}/-/ready", timeout=1.5)
-            if resp.status_code == 200:
-                prometheus_status = "ok"
-                break
+            with httpx.Client(timeout=httpx.Timeout(1.0, connect=0.4)) as client:
+                resp = client.get(f"{base}/-/ready")
+                if resp.status_code == 200:
+                    prometheus_status = "ok"
+                    break
         except Exception:
             continue
 
     pap_status = "unreachable"
     active_pap_url = PAP_API_URL
-    pap_resp = _request_pap("GET", "/health", timeout=2.0)
+    pap_resp = _request_pap("GET", "/health", timeout=1.0)
     if pap_resp is not None and pap_resp.status_code == 200:
         pap_status = "ok"
         active_pap_url = str(pap_resp.request.url).split("/health")[0]
 
     overall = "healthy" if (prometheus_status == "ok" or pap_status == "ok") else "degraded"
-    return schemas.HealthResponse(
+    res = schemas.HealthResponse(
         status=overall,
         api="ok",
         prometheus=prometheus_status,
@@ -1012,6 +1076,9 @@ def health_check():
         pap_url=active_pap_url,
         timestamp=datetime.now(tz=timezone.utc),
     )
+    _health_cache = res
+    _health_cache_ts = now
+    return res
 
 
 @app.get("/api/pap/status", tags=["Personal API Platform"])
@@ -1047,7 +1114,7 @@ def get_pap_connection_status(db: Session = Depends(get_db)):
 @app.post("/api/pap/sync", tags=["Personal API Platform"])
 def sync_pap_devices_endpoint(db: Session = Depends(get_db)):
     """Sinkronisasi dua arah antara IoT Dashboard dan Personal API Platform (API Utama)."""
-    sync_from_prometheus(db)
+    sync_from_prometheus(db, force=True)
     sync_info = sync_with_pap(db)
     devices = crud.get_devices(db)
     return {
@@ -1125,12 +1192,19 @@ def get_all_statuses(db: Session = Depends(get_db)):
 # Auto-Sync Prometheus Telemetry with DB
 # ─────────────────────────────────────────────
 
-def sync_from_prometheus(db: Session):
+def sync_from_prometheus(db: Session, force: bool = False):
     """
     Auto-discover and synchronize devices sending telemetry in Prometheus (sysctrl_STS).
     If a device is sending data via MQTT to Prometheus, ensure it is registered
     in the SQLite database with its reported model under Heatpress hierarchy.
+    Throttled to run at most once per 60 seconds unless force=True.
     """
+    global _last_prom_sync_ts
+    now = time.time()
+    if not force and (now - _last_prom_sync_ts) < 60.0:
+        return
+    _last_prom_sync_ts = now
+
     try:
         # Also clean up any lingering dummy placeholders
         db.query(models.Device).filter(
@@ -1222,7 +1296,6 @@ def get_device_hierarchy(db: Session = Depends(get_db)):
       - Coming Soon (Next-Gen Expansion)
     Disertai status online/offline dan daftar perangkat untuk tiap model.
     """
-    sync_from_prometheus(db)
     devices = crud.get_devices(db)
     online_macs = _get_online_macs()
 
@@ -1423,7 +1496,7 @@ def sync_devices_endpoint(db: Session = Depends(get_db)):
     Sinkronisasi manual/otomatis: tarik seluruh device yang aktif di Prometheus/MQTT
     serta sinkronkan dengan Personal API Platform (API Utama).
     """
-    sync_from_prometheus(db)
+    sync_from_prometheus(db, force=True)
     pap_info = sync_with_pap(db)
     devices = crud.get_devices(db)
     return {

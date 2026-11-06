@@ -82,6 +82,8 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - psm-storage:/opt/psm
+    mem_limit: 384m
+    cpus: 0.50
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 15s
@@ -101,6 +103,8 @@ services:
       dockerfile: infrastructure/docker/Dockerfile.web
     container_name: psm-web
     restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.50
     ports:
       - "${PSM_WEB_PORT:-3005}:3005"
     environment:
@@ -119,6 +123,8 @@ services:
       dockerfile: infrastructure/docker/Dockerfile.agent
     container_name: psm-agent
     restart: unless-stopped
+    mem_limit: 192m
+    cpus: 0.25
     env_file:
       - .env
     environment:
@@ -149,6 +155,8 @@ services:
     image: telegraf:1.29
     container_name: iot_telegraf
     restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.25
     ports:
       - "${IOT_TELEGRAF_PORT:-9273}:9273"
     volumes:
@@ -175,6 +183,8 @@ services:
       context: ./dashboard_iot/api
     container_name: iot_device_mapping_api
     restart: always
+    mem_limit: 256m
+    cpus: 0.50
     ports:
       - "${IOT_API_PORT:-8002}:8000"
     volumes:
@@ -209,6 +219,8 @@ services:
     image: nginx:alpine
     container_name: iot_dashboard_web
     restart: always
+    mem_limit: 128m
+    cpus: 0.25
     ports:
       - "${IOT_WEB_PORT:-8088}:80"
     volumes:
