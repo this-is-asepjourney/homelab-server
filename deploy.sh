@@ -238,6 +238,11 @@ deploy_containers() {
     log_info "Membangun Docker image (pap-api, psm-api, psm-web, psm-agent, iot-api, iot-web)..."
     docker compose build --parallel
 
+    # Bersihkan kontainer lama jika ada bentrok nama dari project standalone sebelumnya
+    log_info "Membersihkan kontainer lama yang masih aktif agar tidak bentrok..."
+    docker rm -f psm-api psm-web psm-agent pap-api iot_telegraf iot_device_mapping_api iot_dashboard_web 2>/dev/null || true
+    docker network rm psm-network 2>/dev/null || true
+
     # Jalankan container
     log_info "Menjalankan container di background..."
     docker compose up -d --remove-orphans
