@@ -1,0 +1,10 @@
+[submodule "Personal Api Platform"]
+	path = Personal Api Platform
+	url = https://github.com/this-is-asepjourney/personal_api_platform.git
+[submodule "Personal_Server_Manager"]
+	path = Personal_Server_Manager
+	url = https://github.com/this-is-asepjourney/personal_server_manager.git
+[submodule "dashboard_iot"]
+	path = dashboard_iot
+	url = https://github.com/this-is-asepjourney/dashboard_iot.git
+
