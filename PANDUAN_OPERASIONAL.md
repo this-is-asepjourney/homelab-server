@@ -53,18 +53,17 @@ flowchart TD
     end
 
     subgraph STACK_HOMELAB["Stack Docker Homelab Terpadu (docker-compose.yml)"]
-        subgraph MODUL_CORE["Modul Core API Gateway (Pusat Terpadu)"]
-            PAP_API["pap-api (:8000)<br/>Central Core API Gateway<br/>• Native IoT Fleet Engine<br/>• Business Integrations & Auth<br/>• PSM Control Gateway"]
+        subgraph MODUL_CORE["1 CENTRAL CORE API GATEWAY & MANAGEMENT"]
+            PAP_API["pap-api (:8000)<br/>• Mission Control Web UI (GET /)<br/>• PSM Control Plane Engine<br/>• IoT Heatpress Fleet Engine<br/>• Disaster Recovery Backup Engine<br/>• Gateway Auth & Database Registry"]
         end
 
-        subgraph MODUL_IOT["Modul IoT Fleet Dashboard"]
+        subgraph MODUL_FRONTENDS["Web Frontend Konsol"]
+            PSM_WEB["psm-web (:3005)<br/>PSM Next.js Dashboard"]
+            IOT_WEB["iot_dashboard_web (:8088)<br/>Nginx IoT Portal"]
+        end
+
+        subgraph MODUL_WORKERS["Node Agents & Bridges"]
             TG["iot-telegraf (:9273)<br/>MQTT Exporter"]
-            IOT_WEB["iot_dashboard_web (:8088)<br/>Nginx Web Hub"]
-        end
-
-        subgraph MODUL_PSM["Modul Personal Server Manager"]
-            PSM_API["psm-api (:8001)<br/>Control Plane Backend"]
-            PSM_WEB["psm-web (:3005)<br/>Next.js Web UI"]
             PSM_AGT["psm-agent<br/>Docker Socket Agent"]
         end
     end
@@ -74,16 +73,14 @@ flowchart TD
     MQTT -->|Subscribe heatpress/#| TG
     PROM -->|Scrape metrics /metrics| TG
     PAP_API -->|PromQL Query Device Status| PROM
-    PAP_API -->|PostgreSQL Data| PG
+    PAP_API -->|PostgreSQL Data psm & pap_core| PG
+    PAP_API -->|MySQL Dump stock_umkm| MYSQL
     IOT_WEB -->|Reverse Proxy /api/| PAP_API
     IOT_WEB -->|Reverse Proxy /grafana/| GRAF
     GRAF -->|Read metrics| PROM
 
-    PSM_API -->|Read/Write Data| PG
-    PSM_API -->|Query Host Health| PROM
-    PSM_WEB -->|API Calls & WebSocket| PSM_API
-    PSM_AGT -->|Report Status| PSM_API
-    PAP_API -.->|Gateway Route /psm/*| PSM_API
+    PSM_WEB -->|API Calls & WebSocket| PAP_API
+    PSM_AGT -->|Report Status & Metrics| PAP_API
 ```
 
 ---
@@ -107,15 +104,15 @@ flowchart TD
 ### B. Kontainer Aplikasi Master Stack (Unified Architecture)
 | Nama Container | Port Host | Port Kontainer | Jaringan Internal | Keterangan |
 | :--- | :--- | :--- | :--- | :--- |
-| **`pap-api`** | `0.0.0.0:8000` | `8000` | `homelab-network` | **Central Core API Gateway** (Native IoT Fleet + Auth + PSM Gateway) |
-| **`psm-api`** | `0.0.0.0:8001` | `8000` | `homelab-network`, `psm-network` | Personal Server Manager Control Plane Backend |
-| **`psm-web`** | `0.0.0.0:3005` | `3005` | `psm-network` | Personal Server Manager Web (Next.js) |
-| **`psm-agent`** | - | - | `psm-network` | Docker Host Agent Controller |
+| **`pap-api`** | `0.0.0.0:8000` | `8000` | `homelab-network`, `psm-network` | **Central Core API Gateway & Mission Control** (PAP Core + PSM Engine + IoT Fleet + Disaster Recovery Backup Engine) |
+| **`psm-web`** | `0.0.0.0:3005` | `3005` | `homelab-network`, `psm-network` | Personal Server Manager Web (Next.js) |
+| **`psm-agent`** | - | - | `homelab-network`, `psm-network` | Docker Host Agent Controller |
 | **`iot_telegraf`** | `0.0.0.0:9273` | `9273` | `homelab-network` | MQTT to Prometheus Exporter |
 | **`iot_dashboard_web`** | `0.0.0.0:8088` | `80` | `homelab-network` | Nginx Hub (Reverse proxy langsung ke `pap-api:8000`) |
 
 > [!NOTE]
-> Container `iot_device_mapping_api` telah **dipensiunkan & disatukan ke dalam `pap-api`**. Tidak ada lagi runtime Python duplikat untuk device mapping, menghemat ~450MB RAM dan mengeliminasi masalah CPU spike secara permanen.
+> Container `psm-api` dan `iot_device_mapping_api` telah **disatukan sepenuhnya ke dalam `pap-api` (:8000)**.
+> Seluruh fungsionalitas PSM Control Plane, Device Mapping IoT, dan Disaster Recovery Backup kini berjalan pada satu runtime Python efisien, menghemat ~800MB RAM server dan mencegah duplikasi proses background.
 
 ---
 
@@ -368,9 +365,9 @@ docker stats --no-stream
 ### 6.2 Personal Server Manager (PSM)
 
 #### A. Alamat Akses Antarmuka
-- **PSM Web Dashboard (Next.js)**: `http://192.168.25.101:3005/`
-- **PSM Control Plane API**: `http://192.168.25.101:8001/`
-- **PSM Swagger API Docs**: `http://192.168.25.101:8001/docs`
+- **PSM Web Dashboard (Next.js)**: `http://192.168.25.101:3005/` (atau Tailscale: `http://100.106.63.90:3005/`)
+- **PSM Control Plane API**: Disatukan dalam `pap-api` pada `http://192.168.25.101:8000/api/v1/`
+- **PSM Swagger API Docs**: `http://192.168.25.101:8000/docs`
 
 #### B. Fitur & Penggunaan
 - **Server Health**: Memantau beban CPU, RAM, disk host secara langsung via Prometheus host (`:9001`) dan `psm-agent`.
@@ -379,67 +376,90 @@ docker stats --no-stream
 
 ---
 
-### 6.3 Personal API Platform (PAP)
+### 6.3 Personal API Platform (PAP) & Homelab Mission Control
 
 #### A. Alamat Akses Antarmuka
-- **API Base URL**: `http://192.168.25.101:8000/`
+- **Homelab Mission Control Web UI**: `http://192.168.25.101:8000/` (atau `http://100.106.63.90:8000/`)
+- **Central API Base URL**: `http://192.168.25.101:8000/`
 - **Health Check**: `http://192.168.25.101:8000/health`
 - **OpenAPI / Swagger Docs**: `http://192.168.25.101:8000/docs`
 
-#### B. Integrasi Antar-Layanan
-PAP bertindak sebagai API gateway dan penyedia token integrasi bersama. Kunci API default untuk inter-service communication dapat dikonfigurasi pada file `.env` (`PAP_API_KEY`).
+#### B. Mission Control Web Management UI
+PAP Core kini dilengkapi antarmuka web modern mandiri yang dapat dibuka langsung di browser:
+1. **Ringkasan Sistem**: Status real-time seluruh layanan homelab (PAP, PSM, IoT, DB PostgreSQL, DB MySQL, Mosquitto, Prometheus, Grafana).
+2. **Manajemen Backup & Disaster Recovery**: Tombol 1-klik untuk mencadangkan database dan konfigurasi, tabel riwayat arsip, unduh file `.tar.gz`, dan inspeksi manifest.
+3. **Armada Heatpress IoT**: Kartu status online/offline ketiga mesin (HPM 55, AF-450, APM-LOGO) serta tombol sinkronisasi telemetri.
+4. **Layanan & Kontainer**: Status port dan arsitektur seluruh container.
+5. **Gateway Routing Explorer**: Daftar endpoint API terpadu.
 
 ---
 
-## 7. Prosedur Backup & Restore
+## 7. Prosedur Backup & Disaster Recovery
 
-### A. Komponen yang Perlu Dibackup
+Sistem Homelab kini memiliki **Mesin Pencadangan Terpusat (Homelab Disaster Recovery Engine)** bawaan yang terintegrasi di dalam `pap-api`.
 
-1. **Database SQLite IoT Mapping**:
-   - Lokasi: `/opt/projects/homelab-server/data/mapping.db` & `/opt/projects/homelab-server/dashboard_iot/api/data/mapping.db`
-   - File ini menyimpan seluruh relasi MAC Address ↔ Nama Mesin ↔ Lokasi.
-2. **Database PostgreSQL Host (PSM & App Data)**:
-   - Database: `psm`
-3. **Volume Persisten PSM**:
-   - Volume: `homelab-server_psm-storage` (atau `psm-storage`)
-4. **File Konfigurasi**:
-   - File `/opt/projects/homelab-server/.env` dan `/opt/homelab/prometheus/config/prometheus.yml`.
+### A. Metode Pencadangan Otomatis via Web UI (Rekomendasi)
+1. Buka browser ke **Homelab Mission Control**: `http://192.168.25.101:8000/` (atau via Tailscale: `http://100.106.63.90:8000/`).
+2. Masuk ke tab **"Backup & Disaster Recovery"**.
+3. Klik tombol **"➕ Buat Backup Baru"**.
+4. Pilih cakupan cadangan:
+   - **Full System (Semua Project)**: Mencadangkan seluruh database (PostgreSQL `psm`, `pap_core`; MySQL `stock_umkm`) dan file konfigurasi (`docker-compose.yml`, `.env`, `prometheus.yml`, `mosquitto.conf`, `telegraf.conf`).
+   - **Hanya Database**: Mencadangkan data relasional PostgreSQL dan MySQL.
+   - **Hanya Konfigurasi**: Mencadangkan file setting lingkungan dan compose stack.
+5. Klik **"Mulai Cadangkan Sekarang"**. File arsip berformat `.tar.gz` dengan hash SHA-256 dan manifest JSON akan langsung terbuat dan dapat diunduh (tombol **⬇️ Unduh**).
 
-### B. Perintah Backup Otomatis (Bash Script)
+### B. Metode Pencadangan via CLI & API
+Anda juga dapat memicu pencadangan langsung dari terminal server `fa`:
 
 ```bash
-#!/bin/bash
-BACKUP_DIR="/home/fa/backups/homelab_$(date +%Y%m%d_%H%M%S)"
-mkdir -p "$BACKUP_DIR"
+# 1. Menggunakan CLI homelab.py
+python3 homelab.py backup --scope all --note "Backup Rutin Server"
 
-echo "[1/4] Backup SQLite IoT Registry (mapping.db)..."
-cp /opt/projects/homelab-server/data/mapping.db "$BACKUP_DIR/mapping.db" || cp /opt/projects/homelab-server/dashboard_iot/api/data/mapping.db "$BACKUP_DIR/mapping.db"
+# 2. Menggunakan HTTP API curl langsung ke Central Gateway
+curl -X POST http://127.0.0.1:8000/api/v1/backups/create \
+     -H "Content-Type: application/json" \
+     -d '{"scope": "all", "note": "Backup via curl"}'
 
-echo "[2/4] Backup Database PostgreSQL Host (psm)..."
-PGPASSWORD="admin12345" pg_dump -h 192.168.25.101 -U appuser -d psm -F c -b -v -f "$BACKUP_DIR/psm_database.dump"
+# 3. Melihat daftar arsip yang tersedia
+curl -s http://127.0.0.1:8000/api/v1/backups | jq .
 
-echo "[3/4] Backup File Environment & Prometheus Config..."
-cp /opt/projects/homelab-server/.env "$BACKUP_DIR/.env.backup"
-cp /opt/homelab/prometheus/config/prometheus.yml "$BACKUP_DIR/prometheus.yml.backup"
-
-echo "[4/4] Backup Volume Storage PSM..."
-docker run --rm -v homelab-server_psm-storage:/data -v "$BACKUP_DIR":/backup alpine tar czf /backup/psm_storage.tar.gz -C /data .
-
-echo "Backup berhasil disimpan di: $BACKUP_DIR"
+# 4. Mengunduh arsip tertentu
+curl -OJ http://127.0.0.1:8000/api/v1/backups/homelab_backup_YYYYMMDD_HHMMSS.tar.gz/download
 ```
 
 ### C. Prosedur Pemulihan (Restore)
+Arsip `.tar.gz` yang dihasilkan berisi struktur berikut:
+```text
+homelab_backup_YYYYMMDD_HHMMSS/
+├── manifest.json
+├── databases/
+│   ├── psm.sql
+│   ├── pap_core.sql
+│   └── stock_umkm.sql
+└── configs/
+    ├── docker-compose.yml
+    ├── homelab.env
+    ├── mosquitto.conf
+    ├── prometheus.yml
+    └── telegraf.conf
+```
 
+Untuk memulihkan data dari arsip:
 ```bash
-# 1. Restore SQLite IoT Registry:
-cp /path/to/backup/mapping.db /opt/projects/homelab-server/data/mapping.db
-cp /path/to/backup/mapping.db /opt/projects/homelab-server/dashboard_iot/api/data/mapping.db
+# 1. Ekstrak arsip
+tar -xzf homelab_backup_YYYYMMDD_HHMMSS.tar.gz
+cd homelab_backup_YYYYMMDD_HHMMSS
 
-# 2. Restore PostgreSQL Database:
-PGPASSWORD="admin12345" pg_restore -h 192.168.25.101 -U appuser -d psm --clean --if-exists /path/to/backup/psm_database.dump
+# 2. Restore PostgreSQL (psm & pap_core)
+PGPASSWORD="admin12345" psql -h 192.168.25.101 -U appuser -d psm < databases/psm.sql
+PGPASSWORD="admin12345" psql -h 192.168.25.101 -U appuser -d pap_core < databases/pap_core.sql
 
-# 3. Restore Volume Storage PSM:
-docker run --rm -v homelab-server_psm-storage:/data -v /path/to/backup:/backup alpine tar xzf /backup/psm_storage.tar.gz -C /data
+# 3. Restore MySQL (stock_umkm)
+mysql -h 192.168.25.101 -P 3306 -u pap_stock_reader -padmin12345 stock_umkm < databases/stock_umkm.sql
+
+# 4. Restore file konfigurasi jika dibutuhkan
+cp configs/docker-compose.yml /opt/projects/homelab-server/
+cp configs/homelab.env /opt/projects/homelab-server/.env
 ```
 
 ---

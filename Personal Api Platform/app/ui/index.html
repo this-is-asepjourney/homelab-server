@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PAP Core — Homelab Mission Control & Backup Manager</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>">
+  <style>
+    :root {
+      --bg-dark: #0f172a;
+      --bg-card: #1e293b;
+      --bg-card-hover: #334155;
+      --border-color: #334155;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --radius: 10px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+    body { background-color: var(--bg-dark); color: var(--text-main); min-height: 100vh; display: flex; flex-direction: column; }
+    header { background-color: #1e293b; border-bottom: 1px solid var(--border-color); padding: 1rem 1.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; }
+    .brand { display: flex; align-items: center; gap: 0.75rem; }
+    .brand-icon { font-size: 1.8rem; background: linear-gradient(135deg, #3b82f6, #8b5cf6); border-radius: 8px; padding: 4px 8px; display: inline-flex; align-items: center; justify-content: center; }
+    .brand-title { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.5px; }
+    .brand-subtitle { font-size: 0.75rem; color: var(--text-muted); }
+    .header-badges { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+    .badge { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.7rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; }
+    .badge-success { background-color: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .badge-info { background-color: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
+    .badge-dot { width: 8px; height: 8px; border-radius: 50%; background-color: currentColor; display: inline-block; }
+    .nav-tabs { display: flex; gap: 0.5rem; padding: 0.75rem 1.5rem; background-color: #0b1120; border-bottom: 1px solid var(--border-color); overflow-x: auto; }
+    .nav-tab { background: transparent; border: none; color: var(--text-muted); padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.875rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; transition: all 0.2s; white-space: nowrap; }
+    .nav-tab:hover { color: var(--text-main); background-color: rgba(255, 255, 255, 0.05); }
+    .nav-tab.active { color: #ffffff; background-color: var(--primary); }
+    .quick-links { display: flex; gap: 0.5rem; }
+    .quick-link-btn { background: #334155; color: var(--text-main); text-decoration: none; padding: 0.35rem 0.75rem; border-radius: 6px; font-size: 0.75rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.35rem; transition: background 0.2s; }
+    .quick-link-btn:hover { background: #475569; }
+    main { flex: 1; padding: 1.5rem; max-width: 1400px; width: 100%; margin: 0 auto; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.25rem; margin-bottom: 1.5rem; }
+    .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.25rem; margin-bottom: 1.5rem; }
+    .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+    .card { background-color: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius); padding: 1.25rem; }
+    .card-title { font-size: 1rem; font-weight: 600; margin-bottom: 0.75rem; display: flex; align-items: center; justify-content: space-between; }
+    .card-stat { font-size: 1.75rem; font-weight: 700; color: #ffffff; margin-bottom: 0.25rem; }
+    .card-desc { font-size: 0.8rem; color: var(--text-muted); }
+    .status-list { list-style: none; display: flex; flex-direction: column; gap: 0.75rem; }
+    .status-item { display: flex; justify-content: space-between; align-items: center; padding: 0.6rem 0.75rem; background: rgba(0,0,0,0.2); border-radius: 6px; font-size: 0.85rem; }
+    .status-name { display: flex; align-items: center; gap: 0.5rem; font-weight: 500; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; padding: 0.55rem 1.1rem; border-radius: 6px; font-size: 0.85rem; font-weight: 600; cursor: pointer; border: none; transition: all 0.2s; text-decoration: none; }
+    .btn-primary { background-color: var(--primary); color: #ffffff; }
+    .btn-primary:hover { background-color: var(--primary-hover); }
+    .btn-danger { background-color: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+    .btn-danger:hover { background-color: rgba(239, 68, 68, 0.3); }
+    .btn-sm { padding: 0.3rem 0.6rem; font-size: 0.75rem; }
+    .table-container { overflow-x: auto; border: 1px solid var(--border-color); border-radius: var(--radius); background-color: var(--bg-card); }
+    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.85rem; }
+    th { background-color: rgba(0,0,0,0.3); padding: 0.75rem 1rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.5px; }
+    td { padding: 0.8rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background-color: rgba(255,255,255,0.02); }
+    .form-group { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 1rem; }
+    .form-label { font-size: 0.8rem; font-weight: 600; color: var(--text-muted); }
+    .form-control { background-color: #0f172a; border: 1px solid var(--border-color); border-radius: 6px; padding: 0.6rem 0.75rem; color: #fff; font-size: 0.85rem; }
+    .form-control:focus { outline: none; border-color: var(--primary); }
+    .modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); z-index: 100; align-items: center; justify-content: center; }
+    .modal-backdrop.active { display: flex; }
+    .modal-box { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; width: 90%; max-width: 600px; max-height: 85vh; overflow-y: auto; padding: 1.5rem; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border-color); }
+    .modal-title { font-size: 1.1rem; font-weight: 700; }
+    .modal-close { background: none; border: none; color: var(--text-muted); font-size: 1.5rem; cursor: pointer; }
+    .code-preview { background-color: #0b1120; border: 1px solid var(--border-color); border-radius: 6px; padding: 0.75rem; font-family: monospace; font-size: 0.75rem; color: #38bdf8; overflow-x: auto; max-height: 300px; white-space: pre-wrap; }
+    .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: #fff; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    footer { border-top: 1px solid var(--border-color); padding: 1rem 1.5rem; text-align: center; font-size: 0.75rem; color: var(--text-muted); background: #0b1120; }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">🛡️</div>
+      <div>
+        <div class="brand-title">PAP Core • Mission Control</div>
+        <div class="brand-subtitle">Homelab Central API Gateway, PSM Control Plane & Backup Manager</div>
+      </div>
+    </div>
+    <div class="header-badges">
+      <span class="badge badge-success"><span class="badge-dot"></span> Host: fa (192.168.25.101)</span>
+      <span class="badge badge-info"><span class="badge-dot"></span> Tailscale: 100.106.63.90</span>
+      <div class="quick-links">
+        <a href="http://192.168.25.101:3005" target="_blank" class="quick-link-btn">🖥️ PSM Web (:3005)</a>
+        <a href="http://192.168.25.101:8088" target="_blank" class="quick-link-btn">📟 IoT (:8088)</a>
+        <a href="http://192.168.25.101:3001" target="_blank" class="quick-link-btn">📊 Grafana (:3001)</a>
+        <a href="/docs" target="_blank" class="quick-link-btn">📖 Swagger Docs</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- NAVIGATION TABS -->
+  <nav class="nav-tabs">
+    <button class="nav-tab active" onclick="switchTab('tab-overview')">📊 Ringkasan Sistem</button>
+    <button class="nav-tab" onclick="switchTab('tab-backups')">💾 Backup & Disaster Recovery</button>
+    <button class="nav-tab" onclick="switchTab('tab-iot')">📟 IoT Heatpress Fleet</button>
+    <button class="nav-tab" onclick="switchTab('tab-containers')">🐳 Layanan & Kontainer</button>
+    <button class="nav-tab" onclick="switchTab('tab-api')">🔌 Gateway API Docs</button>
+  </nav>
+
+  <!-- MAIN CONTENT -->
+  <main>
+
+    <!-- TAB 1: OVERVIEW -->
+    <div id="tab-overview" class="tab-content active">
+      <div class="grid-4">
+        <div class="card">
+          <div class="card-desc">Central API Core</div>
+          <div class="card-stat" style="color: #60a5fa;">:8000</div>
+          <div class="card-desc">PAP + PSM + IoT Unified</div>
+        </div>
+        <div class="card">
+          <div class="card-desc">Total Arsip Backup</div>
+          <div class="card-stat" id="stat-backup-count">0</div>
+          <div class="card-desc" id="stat-backup-size">0 MB terpakai</div>
+        </div>
+        <div class="card">
+          <div class="card-desc">Armada Heatpress IoT</div>
+          <div class="card-stat" style="color: #34d399;">3 Mesin</div>
+          <div class="card-desc">HPM 55, AF-450, APM-LOGO</div>
+        </div>
+        <div class="card">
+          <div class="card-desc">Database PostgreSQL & MySQL</div>
+          <div class="card-stat" style="color: #a78bfa;">3 DB</div>
+          <div class="card-desc">psm, pap_core, stock_umkm</div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">
+            <span>Kondisi Layanan Homelab</span>
+            <span class="badge badge-success">Zero Duplication</span>
+          </div>
+          <ul class="status-list">
+            <li class="status-item">
+              <span class="status-name">🛡️ Central API Gateway (pap-api)</span>
+              <span class="badge badge-success">Port 8000 • Healthy</span>
+            </li>
+            <li class="status-item">
+              <span class="status-name">⚙️ PSM Control Plane Engine</span>
+              <span class="badge badge-success">Unified in PAP</span>
+            </li>
+            <li class="status-item">
+              <span class="status-name">🖥️ PSM Web Console</span>
+              <span class="badge badge-info">Port 3005 • Active</span>
+            </li>
+            <li class="status-item">
+              <span class="status-name">📟 IoT Heatpress Telemetry & Web</span>
+              <span class="badge badge-success">Port 8088 / 9273</span>
+            </li>
+            <li class="status-item">
+              <span class="status-name">🗄️ PostgreSQL Server (psm, pap_core)</span>
+              <span class="badge badge-success">Port 5432 • Host</span>
+            </li>
+            <li class="status-item">
+              <span class="status-name">🐬 MySQL Server (stock_umkm)</span>
+              <span class="badge badge-success">Port 3306 • Host</span>
+            </li>
+            <li class="status-item">
+              <span class="status-name">📡 Mosquitto MQTT Broker</span>
+              <span class="badge badge-info">Port 1883 • Host</span>
+            </li>
+            <li class="status-item">
+              <span class="status-name">📈 Prometheus & Grafana Monitoring</span>
+              <span class="badge badge-info">Port 9001 / 3001</span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <span>Aksi Cepat & Disaster Recovery</span>
+          </div>
+          <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.25rem; line-height: 1.5;">
+            Sistem Homelab kini menggunakan arsitektur <b>1 Central API Gateway (PAP Core)</b> yang menyatukan PSM Control Plane, IoT Device Mapping, dan Layanan Backup Terpadu. Tidak ada kontainer database atau broker duplikat yang membebani memori server fa.
+          </p>
+          <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+            <button class="btn btn-primary" onclick="openCreateBackupModal()">💾 Buat Backup Sistem Sekarang</button>
+            <button class="btn" style="background: #334155; color: #fff;" onclick="syncIotTelemetry()">🔄 Sinkronisasi Telemetri IoT</button>
+            <a href="/docs" target="_blank" class="btn" style="background: #1e293b; color: #60a5fa; border: 1px solid var(--border-color);">📖 Buka Dokumentasi Swagger API</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: BACKUPS -->
+    <div id="tab-backups" class="tab-content">
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <div class="card-title">
+          <span>Manajemen Backup & Disaster Recovery</span>
+          <button class="btn btn-primary" onclick="openCreateBackupModal()">➕ Buat Backup Baru</button>
+        </div>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+          Mencadangkan seluruh database (PostgreSQL <code>psm</code>, <code>pap_core</code>; MySQL <code>stock_umkm</code>) dan konfigurasi layanan (Docker Compose, Prometheus, Mosquitto, Telegraf, .env) ke dalam arsip terkompresi <code>.tar.gz</code>.
+        </p>
+
+        <div id="backup-alert" style="display: none; padding: 0.75rem; border-radius: 6px; margin-bottom: 1rem; font-size: 0.85rem;"></div>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Nama File Arsip</th>
+                <th>Lingkup (Scope)</th>
+                <th>Ukuran</th>
+                <th>Waktu Dibuat</th>
+                <th>Status Database</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="backup-table-body">
+              <tr>
+                <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">Memuat daftar arsip backup...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: IOT FLEET -->
+    <div id="tab-iot" class="tab-content">
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <div class="card-title">
+          <span>Armada Heatpress Machine IoT</span>
+          <button class="btn btn-primary btn-sm" onclick="syncIotTelemetry()">🔄 Sinkronkan dari Prometheus</button>
+        </div>
+        <div class="grid-3" id="iot-cards-container">
+          <!-- HPM 55 -->
+          <div class="card" style="background-color: #111827; border: 1px solid #374151;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <span style="font-weight: 700; font-size: 1.1rem; color: #60a5fa;">HPM 55</span>
+              <span class="badge badge-success">Online</span>
+            </div>
+            <div style="font-family: monospace; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.75rem;">7C:87:CE:2D:B3:7C</div>
+            <div style="font-size: 0.85rem; display: flex; flex-direction: column; gap: 0.35rem;">
+              <div>Lokasi: <b>Workshop Heatpress #1</b></div>
+              <div>Topik MQTT: <code>heatpress/telemetry/7C87CE2DB37C</code></div>
+            </div>
+          </div>
+          <!-- AF-450 -->
+          <div class="card" style="background-color: #111827; border: 1px solid #374151;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <span style="font-weight: 700; font-size: 1.1rem; color: #34d399;">AF-450</span>
+              <span class="badge badge-success">Online</span>
+            </div>
+            <div style="font-family: monospace; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.75rem;">3C:E9:0E:85:2F:A0</div>
+            <div style="font-size: 0.85rem; display: flex; flex-direction: column; gap: 0.35rem;">
+              <div>Lokasi: <b>Lini Produksi A</b></div>
+              <div>Topik MQTT: <code>heatpress/telemetry/3CE90E852FA0</code></div>
+            </div>
+          </div>
+          <!-- APM-LOGO -->
+          <div class="card" style="background-color: #111827; border: 1px solid #374151;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <span style="font-weight: 700; font-size: 1.1rem; color: #f59e0b;">APM-LOGO</span>
+              <span class="badge badge-success">Online</span>
+            </div>
+            <div style="font-family: monospace; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.75rem;">3C:E9:0E:87:64:80</div>
+            <div style="font-size: 0.85rem; display: flex; flex-direction: column; gap: 0.35rem;">
+              <div>Lokasi: <b>Finishing & Logo</b></div>
+              <div>Topik MQTT: <code>heatpress/telemetry/3CE90E876480</code></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: CONTAINERS -->
+    <div id="tab-containers" class="tab-content">
+      <div class="card">
+        <div class="card-title">
+          <span>Layanan Stack Homelab Server</span>
+          <span class="badge badge-info">Docker Swarm / Compose</span>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Nama Layanan</th>
+                <th>Port Host</th>
+                <th>Fungsi</th>
+                <th>Peran Arsitektur</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><b>pap-api</b></td>
+                <td><code style="color: #60a5fa;">8000</code></td>
+                <td>Central Core API Gateway, PSM Control Plane & Backups</td>
+                <td><span class="badge badge-success">Core Master</span></td>
+              </tr>
+              <tr>
+                <td><b>psm-web</b></td>
+                <td><code style="color: #a78bfa;">3005</code></td>
+                <td>Personal Server Manager Web GUI</td>
+                <td>Frontend Console</td>
+              </tr>
+              <tr>
+                <td><b>psm-agent</b></td>
+                <td>Internal</td>
+                <td>Server & Docker Node Telemetry Agent</td>
+                <td>Node Worker</td>
+              </tr>
+              <tr>
+                <td><b>iot_dashboard_web</b></td>
+                <td><code style="color: #34d399;">8088</code></td>
+                <td>Heatpress Fleet Dashboard Nginx</td>
+                <td>IoT Web Portal</td>
+              </tr>
+              <tr>
+                <td><b>iot_telegraf</b></td>
+                <td><code style="color: #f59e0b;">9273</code></td>
+                <td>MQTT to Prometheus Metrics Exporter</td>
+                <td>Telemetry Bridge</td>
+              </tr>
+              <tr>
+                <td><b>grafana</b></td>
+                <td><code style="color: #f43f5e;">3001</code></td>
+                <td>Grafana Server Host (Monitoring Visual)</td>
+                <td>Visual Dashboard</td>
+              </tr>
+              <tr>
+                <td><b>prometheus</b></td>
+                <td><code style="color: #eab308;">9001</code></td>
+                <td>Prometheus Host Scrape Server</td>
+                <td>Metrics TSDB</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 5: API DOCS -->
+    <div id="tab-api" class="tab-content">
+      <div class="card">
+        <div class="card-title">
+          <span>Central API Gateway Routing Explorer</span>
+          <a href="/docs" target="_blank" class="btn btn-primary btn-sm">Buka Swagger UI</a>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Metode & Path</th>
+                <th>Domain / Modul</th>
+                <th>Deskripsi</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code style="color: #34d399;">GET /</code></td>
+                <td>Management UI</td>
+                <td>Homelab Mission Control Dashboard (Halaman Ini)</td>
+              </tr>
+              <tr>
+                <td><code style="color: #34d399;">GET /health</code></td>
+                <td>System</td>
+                <td>Pemeriksaan kesehatan API Gateway utama</td>
+              </tr>
+              <tr>
+                <td><code style="color: #3b82f6;">POST /api/v1/backups/create</code></td>
+                <td>Disaster Recovery</td>
+                <td>Membuat cadangan seluruh database & konfigurasi homelab</td>
+              </tr>
+              <tr>
+                <td><code style="color: #34d399;">GET /api/v1/backups</code></td>
+                <td>Disaster Recovery</td>
+                <td>Melihat daftar arsip backup yang tersedia</td>
+              </tr>
+              <tr>
+                <td><code style="color: #34d399;">GET /api/v1/backups/{file}/download</code></td>
+                <td>Disaster Recovery</td>
+                <td>Mengunduh file arsip backup (.tar.gz)</td>
+              </tr>
+              <tr>
+                <td><code style="color: #34d399;">GET /api/devices/hierarchy</code></td>
+                <td>IoT Fleet</td>
+                <td>Hirarki perangkat Heatpress dan status online real-time</td>
+              </tr>
+              <tr>
+                <td><code style="color: #3b82f6;">POST /api/v1/auth/login</code></td>
+                <td>PSM Control Plane</td>
+                <td>Autentikasi akun PSM</td>
+              </tr>
+              <tr>
+                <td><code style="color: #34d399;">GET /api/v1/servers</code></td>
+                <td>PSM Control Plane</td>
+                <td>Daftar server yang dikelola dalam cluster PSM</td>
+              </tr>
+              <tr>
+                <td><code style="color: #34d399;">GET /api/v1/containers</code></td>
+                <td>PSM Control Plane</td>
+                <td>Monitoring kontainer Docker aktif pada server</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- MODAL: BUAT BACKUP BARU -->
+  <div id="modal-create-backup" class="modal-backdrop">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div class="modal-title">💾 Buat Backup Sistem Homelab</div>
+        <button class="modal-close" onclick="closeCreateBackupModal()">&times;</button>
+      </div>
+      <form onsubmit="handleCreateBackup(event)">
+        <div class="form-group">
+          <label class="form-label">Lingkup Cadangan (Backup Scope)</label>
+          <select id="backup-scope" class="form-control">
+            <option value="all">Full System (Semua Project: Database + Konfigurasi)</option>
+            <option value="databases">Hanya Database (PostgreSQL: psm, pap_core; MySQL: stock_umkm)</option>
+            <option value="configs">Hanya Konfigurasi (Docker Compose, Prometheus, Mosquitto, Telegraf, .env)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Catatan / Label (Opsional)</label>
+          <input type="text" id="backup-note" class="form-control" placeholder="Contoh: Backup Sebelum Update Skrip">
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1.5rem;">
+          <button type="button" class="btn" style="background: #334155; color: #fff;" onclick="closeCreateBackupModal()">Batal</button>
+          <button type="submit" id="btn-submit-backup" class="btn btn-primary">Mulai Cadangkan Sekarang</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: DETAIL MANIFEST -->
+  <div id="modal-manifest" class="modal-backdrop">
+    <div class="modal-box" style="max-width: 700px;">
+      <div class="modal-header">
+        <div class="modal-title" id="manifest-modal-title">📋 Detail Manifest Arsip</div>
+        <button class="modal-close" onclick="closeManifestModal()">&times;</button>
+      </div>
+      <div id="manifest-content" class="code-preview">Memuat...</div>
+      <div style="display: flex; justify-content: flex-end; margin-top: 1.25rem;">
+        <button class="btn btn-primary" onclick="closeManifestModal()">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <footer>
+    Homelab Server fa • Unified Architecture • Zero Duplication Core Gateway &copy; 2026
+  </footer>
+
+  <script>
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.nav-tab').forEach(el => el.classList.remove('active'));
+      const target = document.getElementById(tabId);
+      if (target) target.classList.add('active');
+      const tabs = Array.from(document.querySelectorAll('.nav-tab'));
+      const activeIdx = ['tab-overview', 'tab-backups', 'tab-iot', 'tab-containers', 'tab-api'].indexOf(tabId);
+      if (activeIdx >= 0 && tabs[activeIdx]) tabs[activeIdx].classList.add('active');
+
+      if (tabId === 'tab-backups') loadBackups();
+    }
+
+    async function loadBackups() {
+      const tbody = document.getElementById('backup-table-body');
+      try {
+        const res = await fetch('/api/v1/backups');
+        const json = await res.json();
+        const data = json.data || [];
+
+        // Update stats
+        document.getElementById('stat-backup-count').innerText = data.length;
+        const totalMb = ((json.total_storage_bytes || 0) / (1024 * 1024)).toFixed(2);
+        document.getElementById('stat-backup-size').innerText = `${totalMb} MB terpakai`;
+
+        if (data.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">Belum ada arsip backup. Klik tombol "Buat Backup Baru" untuk mencadangkan.</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = data.map(b => {
+          const dateStr = new Date(b.created_at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
+          const dbs = Object.keys(b.databases || {}).join(', ') || '-';
+          return `
+            <tr>
+              <td>
+                <b>${b.filename}</b>
+                ${b.note ? `<div style="font-size: 0.75rem; color: var(--text-muted);">${b.note}</div>` : ''}
+              </td>
+              <td><span class="badge badge-info">${b.scope}</span></td>
+              <td><b>${b.size_human}</b></td>
+              <td>${dateStr}</td>
+              <td><span style="font-size: 0.8rem; color: #34d399;">${dbs}</span></td>
+              <td style="white-space: nowrap;">
+                <a href="/api/v1/backups/${encodeURIComponent(b.filename)}/download" class="btn btn-primary btn-sm" title="Unduh Arsip">⬇️ Unduh</a>
+                <button onclick="viewManifest('${b.filename}')" class="btn btn-sm" style="background: #334155; color: #fff;" title="Lihat Isi">📋 Isi</button>
+                <button onclick="deleteBackup('${b.filename}')" class="btn btn-danger btn-sm" title="Hapus">🗑️</button>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: #f87171; padding: 2rem;">Gagal memuat arsip backup: ${err.message}</td></tr>`;
+      }
+    }
+
+    function openCreateBackupModal() {
+      document.getElementById('modal-create-backup').classList.add('active');
+    }
+
+    function closeCreateBackupModal() {
+      document.getElementById('modal-create-backup').classList.remove('active');
+    }
+
+    async function handleCreateBackup(e) {
+      e.preventDefault();
+      const scope = document.getElementById('backup-scope').value;
+      const note = document.getElementById('backup-note').value;
+      const btn = document.getElementById('btn-submit-backup');
+      const origText = btn.innerHTML;
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Sedang Mencadangkan...';
+
+      try {
+        const res = await fetch('/api/v1/backups/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scope, note })
+        });
+        const json = await res.json();
+        if (res.ok) {
+          closeCreateBackupModal();
+          showNotification('success', json.message || 'Backup berhasil dibuat!');
+          loadBackups();
+        } else {
+          showNotification('danger', json.detail || 'Gagal membuat backup');
+        }
+      } catch (err) {
+        showNotification('danger', 'Error membuat backup: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = origText;
+      }
+    }
+
+    async function viewManifest(filename) {
+      const modal = document.getElementById('modal-manifest');
+      const content = document.getElementById('manifest-content');
+      document.getElementById('manifest-modal-title').innerText = `📋 Manifest: ${filename}`;
+      content.innerText = 'Memuat manifest dari arsip...';
+      modal.classList.add('active');
+
+      try {
+        const res = await fetch(`/api/v1/backups/${encodeURIComponent(filename)}/manifest`);
+        const json = await res.json();
+        if (res.ok) {
+          content.innerText = JSON.stringify(json.data, null, 2);
+        } else {
+          content.innerText = 'Gagal memuat manifest: ' + (json.detail || 'Unknown error');
+        }
+      } catch (err) {
+        content.innerText = 'Error: ' + err.message;
+      }
+    }
+
+    function closeManifestModal() {
+      document.getElementById('modal-manifest').classList.remove('active');
+    }
+
+    async function deleteBackup(filename) {
+      if (!confirm(`Apakah Anda yakin ingin menghapus arsip backup ${filename}?`)) return;
+      try {
+        const res = await fetch(`/api/v1/backups/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+        const json = await res.json();
+        if (res.ok) {
+          showNotification('success', json.message);
+          loadBackups();
+        } else {
+          showNotification('danger', json.detail || 'Gagal menghapus');
+        }
+      } catch (err) {
+        showNotification('danger', 'Error: ' + err.message);
+      }
+    }
+
+    async function syncIotTelemetry() {
+      try {
+        const res = await fetch('/api/devices/sync', { method: 'POST' });
+        const json = await res.json();
+        alert('Sinkronisasi armada Heatpress berhasil: ' + (json.message || 'Tersinkron dengan Prometheus'));
+      } catch (err) {
+        alert('Gagal sinkronisasi: ' + err.message);
+      }
+    }
+
+    function showNotification(type, msg) {
+      const el = document.getElementById('backup-alert');
+      el.style.display = 'block';
+      el.style.backgroundColor = type === 'success' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)';
+      el.style.color = type === 'success' ? '#34d399' : '#f87171';
+      el.style.border = `1px solid ${type === 'success' ? '#059669' : '#dc2626'}`;
+      el.innerText = msg;
+      setTimeout(() => { el.style.display = 'none'; }, 5000);
+    }
+
+    // Initial load
+    document.addEventListener('DOMContentLoaded', () => {
+      loadBackups();
+    });
+  </script>
+</body>
+</html>
+

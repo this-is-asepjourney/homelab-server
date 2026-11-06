@@ -1,11 +1,12 @@
-"""FastAPI application entry point for Personal API Platform (PAP)."""
+"""FastAPI application entry point for Personal API Platform (PAP) & Unified Homelab Core Gateway."""
 
-import os
 from contextlib import asynccontextmanager
+import os
+from pathlib import Path
 
-import httpx
 from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 
 from app.core.config import get_settings
 from app.core.database import Base, SessionLocal, engine
@@ -15,6 +16,7 @@ from app.core.middleware import RequestContextAndSecurityMiddleware
 from app.modules import import_all_models
 from app.modules.audit.router import router as audit_router
 from app.modules.auth.router import router as auth_router
+from app.modules.backups.router import router as backups_router
 from app.modules.clients.router import router as clients_router
 from app.modules.database_registry.router import router as database_router
 from app.modules.docker.router import router as docker_router
@@ -30,16 +32,39 @@ from app.modules.users.router import router as users_router
 from app.modules.webhooks.router import router as webhooks_router
 from app.services.bootstrap import seed_platform_registry
 
+# Direct imports for unified PSM control plane
+try:
+    from apps.api.app.api.v1.router import api_router as psm_api_router
+    from apps.api.app.main import init_db as init_psm_db
+    from apps.api.app.websocket.handlers import ws_router as psm_ws_router
+    HAS_PSM_DIRECT = True
+except Exception as e:
+    HAS_PSM_DIRECT = False
+    psm_api_router = None
+    psm_ws_router = None
+    init_psm_db = None
+    print(f"[PAP Gateway] Note on PSM direct router load: {e}")
+
 
 @asynccontextmanager
 async def _lifespan(application: FastAPI):
+    # 1. Initialize PAP Core Database
     try:
         import_all_models()
         Base.metadata.create_all(bind=engine)
         with SessionLocal() as db:
             seed_platform_registry(db)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[PAP Core] Startup notice: {e}")
+
+    # 2. Initialize PSM Database (auto-creates 'psm' PostgreSQL db and seeds homelab)
+    if HAS_PSM_DIRECT and init_psm_db:
+        try:
+            init_psm_db()
+            print("[PAP Core] PSM Control Plane database & schema ready.")
+        except Exception as e:
+            print(f"[PAP Core] PSM DB init notice: {e}")
+
     yield
 
 
@@ -51,8 +76,8 @@ def create_app() -> FastAPI:
     application = FastAPI(
         title=settings.APP_NAME,
         description=(
-            "Self-hosted Modular Monolith integration platform for applications, "
-            "IoT devices, databases, and homelab infrastructure."
+            "Central Core API Gateway & Management Platform for Homelab Server, "
+            "PSM Control Plane, IoT Devices, Database Registry, and Disaster Recovery Backups."
         ),
         version=settings.APP_VERSION,
         docs_url="/docs",
@@ -71,15 +96,21 @@ def create_app() -> FastAPI:
 
     register_exception_handlers(application)
 
-    # Mount root system endpoints (/health, /ready, /system/info, /system/version, /metrics)
+    # ── Root Endpoints ─────────────────────────────────────────────────────────
+    # System info, health, and prometheus metrics
     application.include_router(server_router)
-    # Mount IoT Dashboard direct compatibility routes (/api/devices/*, /api/health)
+    # IoT Dashboard direct compatibility routes (/api/devices/*, /api/health)
     application.include_router(compat_devices_router)
 
-    # Mount versioned API v1 router (/api/v1/...)
+    # PSM WebSockets (/ws/servers/..., /ws/deployments/...)
+    if HAS_PSM_DIRECT and psm_ws_router:
+        application.include_router(psm_ws_router)
+
+    # ── Versioned API v1 Router (/api/v1/...) ──────────────────────────────────
     api_v1 = APIRouter(prefix=settings.API_PREFIX)
     api_v1.include_router(server_router)
     api_v1.include_router(auth_router)
+    api_v1.include_router(backups_router)  # Unified Backup & Disaster Recovery
     api_v1.include_router(users_router)
     api_v1.include_router(permissions_router)
     api_v1.include_router(projects_router)
@@ -96,50 +127,56 @@ def create_app() -> FastAPI:
 
     application.include_router(api_v1)
 
-    # ── PSM Gateway Forwarding ─────────────────────────
-    # Allows PAP Core API (:8000) to act as central reverse-proxy for PSM control plane
-    @application.api_route(
-        "/psm/{path:path}",
-        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        include_in_schema=False,
-    )
-    async def psm_gateway_proxy(request: Request, path: str):
-        psm_base = os.getenv("PSM_API_URL", "http://psm-api:8000").rstrip("/")
-        target_url = f"{psm_base}/{path}"
-        headers = dict(request.headers)
-        headers.pop("host", None)
-        try:
-            body = await request.body()
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                res = await client.request(
-                    method=request.method,
-                    url=target_url,
-                    headers=headers,
-                    params=request.query_params,
-                    content=body,
-                )
-                return Response(
-                    content=res.content,
-                    status_code=res.status_code,
-                    headers=dict(res.headers),
-                    media_type=res.headers.get("content-type"),
-                )
-        except Exception as e:
-            from fastapi import HTTPException
-            raise HTTPException(status_code=502, detail=f"PSM service unavailable via gateway: {e}")
+    # ── PSM Control Plane Direct Integration ───────────────────────────────────
+    if HAS_PSM_DIRECT and psm_api_router:
+        # Mount PSM endpoints directly under /api/v1 (servers, agents, containers, deployments, etc.)
+        application.include_router(psm_api_router, prefix="/api/v1")
+        # Also alias under /psm/api/v1 and /psm for seamless proxy backward compatibility
+        application.include_router(psm_api_router, prefix="/psm/api/v1")
 
+    # ── Mission Control Web Management UI ──────────────────────────────────────
+    @application.get("/", response_class=HTMLResponse, include_in_schema=False)
+    @application.get("/ui", response_class=HTMLResponse, include_in_schema=False)
+    async def serve_mission_control_ui():
+        ui_file = Path(__file__).parent / "ui" / "index.html"
+        if ui_file.exists():
+            return HTMLResponse(content=ui_file.read_text(encoding="utf-8"))
+        return HTMLResponse(content="<h1>PAP Core Gateway Running</h1><p><a href='/docs'>Swagger API Docs</a></p>")
+
+    # ── Agent Setup Script ─────────────────────────────────────────────────────
     @application.get("/install-agent.sh", include_in_schema=False)
     async def install_agent_script():
-        psm_base = os.getenv("PSM_API_URL", "http://psm-api:8000").rstrip("/")
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                res = await client.get(f"{psm_base}/install-agent.sh")
-                return Response(content=res.content, status_code=res.status_code, media_type="text/x-shellscript")
-        except Exception:
-            return Response(content="#!/bin/bash\necho 'PSM service initializing...'\n", media_type="text/x-shellscript")
+        script_content = """#!/usr/bin/env bash
+set -e
+echo "========================================="
+echo "Personal Server Manager (PSM) Agent Setup"
+echo "========================================="
+
+if [ -z "$PSM_SERVER_ID" ] || [ -z "$PSM_TOKEN" ]; then
+  echo "Error: PSM_SERVER_ID and PSM_TOKEN environment variables are required."
+  exit 1
+fi
+
+PSM_CONTROL_PLANE="${PSM_CONTROL_PLANE:-http://localhost:8000}"
+INSTALL_DIR="/opt/psm/agent"
+
+echo "Target Control Plane: $PSM_CONTROL_PLANE"
+echo "Server ID: $PSM_SERVER_ID"
+
+mkdir -p "$INSTALL_DIR"
+cd "$INSTALL_DIR"
+
+cat <<EOF > agent.env
+SERVER_ID=$PSM_SERVER_ID
+AGENT_TOKEN=$PSM_TOKEN
+CONTROL_PLANE_URL=$PSM_CONTROL_PLANE
+EOF
+
+echo "PSM Agent configured successfully at $INSTALL_DIR/agent.env"
+"""
+        return Response(content=script_content, media_type="text/x-shellscript")
 
     return application
 
 
 app = create_app()
-

@@ -37,6 +37,7 @@ print_banner() {
     echo "╔════════════════════════════════════════════════════════════════════╗"
     echo "║       DEPLOYMENT TERPADU HOMELAB SERVER (UBUNTU fa)                ║"
     echo "║       Arsitektur Zero Duplication & 1 Central API Gateway          ║"
+    echo "║       PAP Core API + PSM + IoT Fleet + Backup Engine               ║"
     echo "╚════════════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
 }
@@ -143,10 +144,10 @@ EOF
 }
 
 # ------------------------------------------------------------------------------
-# 4. SETUP DATABASE POSTGRESQL HOST (PSM)
+# 4. SETUP DATABASE POSTGRESQL HOST (PSM & PAP CORE)
 # ------------------------------------------------------------------------------
 setup_postgres_db() {
-    log_info "Memeriksa database 'psm' di PostgreSQL host..."
+    log_info "Memeriksa database 'psm' & 'pap_core' di PostgreSQL host..."
     if command -v psql &>/dev/null; then
         if PGPASSWORD="admin12345" psql -h "$HOST_IP" -p 5432 -U appuser -lqt | cut -d \| -f 1 | grep -qw psm; then
             log_success "Database 'psm' sudah tersedia di PostgreSQL."
@@ -155,8 +156,16 @@ setup_postgres_db() {
             PGPASSWORD="admin12345" psql -h "$HOST_IP" -p 5432 -U appuser -d postgres -c "CREATE DATABASE psm;" || true
             log_success "Database 'psm' siap digunakan."
         fi
+
+        if PGPASSWORD="admin12345" psql -h "$HOST_IP" -p 5432 -U appuser -lqt | cut -d \| -f 1 | grep -qw pap_core; then
+            log_success "Database 'pap_core' sudah tersedia di PostgreSQL."
+        else
+            log_info "Membuat database 'pap_core' di PostgreSQL host..."
+            PGPASSWORD="admin12345" psql -h "$HOST_IP" -p 5432 -U appuser -d postgres -c "CREATE DATABASE pap_core;" || true
+            log_success "Database 'pap_core' siap digunakan."
+        fi
     else
-        log_info "Client psql lokal tidak ditemukan; inisialisasi database akan ditangani otomatis oleh SQLAlchemy PSM saat runtime."
+        log_info "Client psql lokal tidak ditemukan; inisialisasi database akan ditangani otomatis oleh SQLAlchemy saat runtime."
     fi
 }
 
@@ -178,15 +187,8 @@ setup_env() {
         log_success "File .env sudah tersedia."
     fi
 
-    # Pastikan data/mapping.db sinkron dengan dashboard_iot/api/data/mapping.db
-    if [ -f "data/mapping.db" ] && [ ! -f "dashboard_iot/api/data/mapping.db" ]; then
-        log_info "Menyinkronkan data/mapping.db ke dashboard_iot/api/data/..."
-        mkdir -p dashboard_iot/api/data
-        cp data/mapping.db dashboard_iot/api/data/mapping.db
-    elif [ -f "dashboard_iot/api/data/mapping.db" ] && [ ! -f "data/mapping.db" ]; then
-        mkdir -p data
-        cp dashboard_iot/api/data/mapping.db data/mapping.db
-    fi
+    # Pastikan direktori backup host siap
+    mkdir -p /opt/homelab/backups backups
 }
 
 # ------------------------------------------------------------------------------
@@ -211,8 +213,8 @@ verify_monorepo_modules() {
         log_success "Personal Api Platform siap."
     fi
 
-    if [ ! -d "dashboard_iot/api" ]; then
-        log_error "Direktori dashboard_iot/api tidak ditemukan!"
+    if [ ! -d "dashboard_iot/web" ]; then
+        log_error "Direktori dashboard_iot/web tidak ditemukan!"
         missing=1
     else
         log_success "dashboard_iot siap."
@@ -234,14 +236,14 @@ deploy_containers() {
     docker compose config --quiet
     log_success "Sintaks docker-compose.yml valid."
 
-    # Build container
-    log_info "Membangun Docker image (pap-api, psm-api, psm-web, psm-agent, iot-web)..."
+    # Build container (pap-api memuat PAP Core, PSM, IoT Mapping, dan Backups)
+    log_info "Membangun Docker image (pap-api, psm-web, psm-agent, iot-web)..."
     docker compose build --parallel
 
-    # Bersihkan kontainer lama jika ada bentrok nama dari project standalone sebelumnya
-    log_info "Membersihkan kontainer lama (termasuk mematikan iot_device_mapping_api zombie)..."
+    # Bersihkan kontainer lama (termasuk psm-api lama & iot_device_mapping_api zombie)
+    log_info "Membersihkan kontainer lama (mematikan psm-api & iot_device_mapping_api zombie)..."
     docker rm -f psm-api psm-web psm-agent pap-api iot_telegraf iot_device_mapping_api iot_dashboard_web 2>/dev/null || true
-    docker network rm psm-network iot-network 2>/dev/null || true
+    docker network rm iot-network 2>/dev/null || true
 
     # Jalankan container
     log_info "Menjalankan container di background..."
@@ -251,15 +253,16 @@ deploy_containers() {
 }
 
 # ------------------------------------------------------------------------------
-# 7. HEALTHCHECK & VERIFIKASI ENDPOINT
+# 8. HEALTHCHECK & VERIFIKASI ENDPOINT
 # ------------------------------------------------------------------------------
 verify_deployment() {
     log_info "Menunggu layanan siap (Healthcheck timeout: 45 detik)..."
 
     local endpoints=(
-        "http://$HOST_IP:8000/health|PAP Core API Gateway (:8000)"
-        "http://$HOST_IP:8000/api/health|PAP Native IoT Fleet Health (:8000)"
-        "http://127.0.0.1:8001/health|PSM Control Plane API (:8001)"
+        "http://$HOST_IP:8000/health|PAP Core Central API Gateway (:8000)"
+        "http://$HOST_IP:8000/|Homelab Mission Control Web UI (:8000)"
+        "http://$HOST_IP:8000/api/health|IoT Fleet Telemetry (:8000)"
+        "http://$HOST_IP:8000/api/v1/backups|Homelab Backup Engine (:8000)"
         "http://127.0.0.1:3005|PSM Web Dashboard (:3005)"
         "http://127.0.0.1:8088|IoT Dashboard Web Hub (:8088)"
         "http://127.0.0.1:9273/metrics|IoT Telegraf Exporter (:9273)"
@@ -287,7 +290,7 @@ verify_deployment() {
 }
 
 # ------------------------------------------------------------------------------
-# 8. IMPOR GRAFANA DASHBOARD KE GRAFANA EKSISTING (:3001)
+# 9. IMPOR GRAFANA DASHBOARD KE GRAFANA EKSISTING (:3001)
 # ------------------------------------------------------------------------------
 import_grafana_dashboards() {
     echo ""
@@ -316,7 +319,7 @@ import_grafana_dashboards() {
 }
 
 # ------------------------------------------------------------------------------
-# 9. RINGKASAN STATUS AKHIR
+# 10. RINGKASAN STATUS AKHIR
 # ------------------------------------------------------------------------------
 print_summary() {
     echo ""
@@ -325,19 +328,19 @@ print_summary() {
     echo -e "${GREEN}${BOLD}════════════════════════════════════════════════════════════════════${NC}"
     echo ""
     echo -e "Aplikasi dapat diakses melalui alamat berikut:"
-    echo -e "  • ${BOLD}PAP Core API Gateway${NC}       : http://$HOST_IP:8000/docs"
-    echo -e "  • ${BOLD}PSM Web Dashboard${NC}          : http://$HOST_IP:3005"
-    echo -e "  • ${BOLD}PSM Control Plane API${NC}      : http://$HOST_IP:8001/docs"
-    echo -e "  • ${BOLD}IoT Dashboard Web Hub${NC}      : http://$HOST_IP:8088"
-    echo -e "  • ${BOLD}IoT Device Mapping API${NC}     : http://$HOST_IP:8002/docs"
-    echo -e "  • ${BOLD}Grafana Utama Homelab${NC}      : http://$HOST_IP:3001"
-    echo -e "  • ${BOLD}Prometheus Server${NC}          : http://$HOST_IP:9001"
-    echo -e "  • ${BOLD}Uptime Kuma Health Hub${NC}     : http://$HOST_IP:3002"
+    echo -e "  • ${BOLD}Homelab Mission Control Web UI${NC} : http://$HOST_IP:8000/ (atau http://$HOST_TAILSCALE:8000/)"
+    echo -e "  • ${BOLD}PAP Core Central API Gateway${NC}   : http://$HOST_IP:8000/docs"
+    echo -e "  • ${BOLD}Backup & Disaster Recovery${NC}     : http://$HOST_IP:8000/api/v1/backups"
+    echo -e "  • ${BOLD}PSM Web Dashboard Console${NC}      : http://$HOST_IP:3005"
+    echo -e "  • ${BOLD}IoT Dashboard Web Hub${NC}          : http://$HOST_IP:8088"
+    echo -e "  • ${BOLD}Grafana Utama Homelab${NC}          : http://$HOST_IP:3001"
+    echo -e "  • ${BOLD}Prometheus Server${NC}              : http://$HOST_IP:9001"
     echo ""
     echo -e "Perintah harian yang berguna:"
     echo -e "  Cek status kesehatan      : ${CYAN}python3 homelab.py status${NC}"
+    echo -e "  Buat backup sistem        : ${CYAN}curl -X POST http://127.0.0.1:8000/api/v1/backups/create${NC}"
     echo -e "  Cek log realtime          : ${CYAN}docker compose logs -f${NC}"
-    echo -e "  Restart service tertentu  : ${CYAN}docker compose restart <service_name>${NC}"
+    echo -e "  Restart gateway           : ${CYAN}docker compose restart pap-api${NC}"
     echo -e "  Hentikan stack            : ${CYAN}docker compose down${NC}"
     echo ""
     echo -e "${GREEN}════════════════════════════════════════════════════════════════════${NC}"
@@ -361,4 +364,3 @@ main() {
 }
 
 main "$@"
-

@@ -2,9 +2,8 @@
 """
 homelab.py — CLI Manajemen Terpadu Homelab Server
 Mengelola dan memverifikasi seluruh komponen:
-- Personal API Platform (PAP)
-- Personal Server Manager (PSM)
-- IoT Dashboard (Heatpress Fleet)
+- Personal API Platform (PAP) + PSM Control Plane + IoT Fleet Unified
+- Homelab Backup & Disaster Recovery
 - Layanan Eksisting Host (Mosquitto, PostgreSQL, MySQL, Prometheus, Grafana)
 """
 
@@ -73,15 +72,16 @@ def cmd_status(args):
         if ok and item[2] == "http":
             st, res = http_get(item[3])
             extra = f" (HTTP {st})"
-        print(f"  * {name:<26} Port :{port:<5} -> {badge}{extra}")
+        print(f"  * {name:<28} Port :{port:<5} -> {badge}{extra}")
 
     # 2. Application Projects
-    print("\n[B] APLIKASI UTAMA HOMELAB:")
+    print("\n[B] APLIKASI UTAMA (1 CENTRAL CORE API & ZERO DUPLICATION):")
     services_app = [
-        ("PAP Core API Gateway", 8000, f"http://{host}:8000/health"),
-        ("PSM Control Plane API", 8001, f"http://{host}:8001/health"),
-        ("PSM Web Dashboard", 3005, None),
-        ("IoT Device Mapping API", 8002, f"http://{host}:8002/health"),
+        ("PAP Core API & PSM Gateway", 8000, f"http://{host}:8000/health"),
+        ("Mission Control Web UI", 8000, f"http://{host}:8000/"),
+        ("Disaster Recovery Backup Engine", 8000, f"http://{host}:8000/api/v1/backups"),
+        ("IoT Fleet & Device Telemetry", 8000, f"http://{host}:8000/api/devices/hierarchy"),
+        ("PSM Web Dashboard Console", 3005, None),
         ("IoT Web Dashboard Hub", 8088, f"http://{host}:8088/"),
         ("IoT Telegraf Exporter", 9273, f"http://{host}:9273/metrics"),
     ]
@@ -96,14 +96,38 @@ def cmd_status(args):
                 extra = f" (HTTP {st})"
             except Exception:
                 pass
-        print(f"  * {name:<26} Port :{port:<5} -> {badge}{extra}")
+        print(f"  * {name:<32} Port :{port:<5} -> {badge}{extra}")
 
     print("\n[C] VALIDASI KONSEP 'MENGGUNAKAN YANG SUDAH ADA':")
     print("  [OK] Tidak ada kontainer Grafana duplikat (Menggunakan Grafana port 3001)")
     print("  [OK] Tidak ada kontainer Prometheus duplikat (Menggunakan Prometheus port 9001)")
     print("  [OK] Tidak ada kontainer PostgreSQL duplikat (Menggunakan PostgreSQL port 5432)")
     print("  [OK] Tidak ada kontainer Mosquitto duplikat (Menggunakan Mosquitto port 1883)")
+    print("  [OK] Tidak ada kontainer API redundan (PSM & IoT disatukan dalam pap-api port 8000)")
     print("==================================================================")
+
+
+def cmd_backup(args):
+    host = args.host
+    scope = args.scope
+    note = args.note
+    url = f"http://{host}:8000/api/v1/backups/create"
+    print(f"\n[*] Memicu pembuatan backup sistem di {url} (Scope: {scope})...")
+
+    data = json.dumps({"scope": scope, "note": note}).encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            res = json.loads(resp.read().decode("utf-8"))
+            archive = res.get("data", {}).get("archive", {})
+            print(f"[OK] {res.get('message', 'Backup sukses!')}")
+            print(f"     Nama File : {archive.get('filename')}")
+            print(f"     Ukuran    : {archive.get('size_human')}")
+            print(f"     SHA-256   : {archive.get('sha256')}")
+            return 0
+    except Exception as e:
+        print(f"[ERROR] Gagal membuat backup: {e}")
+        return 1
 
 
 def cmd_import_grafana(args):
@@ -157,6 +181,12 @@ def main():
     parser_status = subparsers.add_parser("status", help="Periksa status konektivitas seluruh layanan homelab")
     parser_status.add_argument("--host", default=os.getenv("HOST_IP", "192.168.25.101"), help="IP Host Homelab")
 
+    # Command: backup
+    parser_backup = subparsers.add_parser("backup", help="Buat cadangan seluruh database & konfigurasi homelab")
+    parser_backup.add_argument("--host", default=os.getenv("HOST_IP", "127.0.0.1"), help="IP Host API Gateway")
+    parser_backup.add_argument("--scope", default="all", choices=["all", "databases", "configs"], help="Lingkup cadangan")
+    parser_backup.add_argument("--note", default="CLI On-demand Backup", help="Catatan backup")
+
     # Command: import-grafana
     parser_grafana = subparsers.add_parser("import-grafana", help="Impor dashboard Heatpress ke Grafana eksisting (:3001)")
     parser_grafana.add_argument("--host", default=os.getenv("HOST_IP", "192.168.25.101"), help="IP Host Homelab")
@@ -169,10 +199,11 @@ def main():
 
     if args.command == "status":
         cmd_status(args)
+    elif args.command == "backup":
+        sys.exit(cmd_backup(args))
     elif args.command == "import-grafana":
         sys.exit(cmd_import_grafana(args))
     else:
-        # Default run status
         args.host = os.getenv("HOST_IP", "192.168.25.101")
         cmd_status(args)
 
