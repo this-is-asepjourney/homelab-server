@@ -1,29 +1,22 @@
 # ╔══════════════════════════════════════════════════════════════════════════════╗
 # ║             MASTER HOMELAB SERVER — UNIFIED DOCKER COMPOSE                   ║
 # ║                                                                              ║
-# ║  KONSEP: "MENGGUNAKAN LAYANAN YANG SUDAH TERINSTALL DI SERVER"               ║
+# ║  KONSEP: "1 CENTRAL CORE API GATEWAY (PAP) & ZERO REDUNDANCY"                ║
+# ║  - PAP Core API Gateway (:8000) adalah API Pusat untuk semua project:        ║
+# ║    * Melayani IoT Heatpress Fleet & Device Mapping secara native             ║
+# ║    * Melayani Core Platform, Project Integrations, dan Auth                  ║
+# ║    * Menghubungkan PSM Control Plane via gateway proxy                       ║
 # ║  - Menggunakan Grafana Utama yang sudah aktif       -> 192.168.25.101:3001   ║
 # ║  - Menggunakan Prometheus Docker yang sudah aktif   -> 192.168.25.101:9001   ║
 # ║  - Menggunakan Mosquitto MQTT yang sudah aktif      -> 192.168.25.101:1883   ║
 # ║  - Menggunakan PostgreSQL Server yang sudah aktif   -> 192.168.25.101:5432   ║
 # ║  - Menggunakan MySQL Server yang sudah aktif        -> 192.168.25.101:3306   ║
-# ║                                                                              ║
-# ║  Hanya menjalankan 6 container aplikasi inti dari 3 proyek:                  ║
-# ║  1. Personal API Platform   : pap-api               (:8000)                  ║
-# ║  2. Personal Server Manager : psm-api               (:8001)                  ║
-# ║                               psm-web               (:3005)                  ║
-# ║                               psm-agent             (Host Agent)             ║
-# ║  3. IoT Dashboard           : iot-telegraf          (:9273)                  ║
-# ║                               iot-api               (:8002)                  ║
-# ║                               iot-web               (:8088)                  ║
-# ║                                                                              ║
-# ║  * TIDAK ADA container duplikat untuk Database, Prometheus, atau Grafana!    ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 
 services:
 
   # ═════════════════════════════════════════════════════════════════
-  # 1. PERSONAL API PLATFORM (PAP — Core API Gateway)
+  # 1. PERSONAL API PLATFORM (PAP — Unified Central API Gateway)
   # ═════════════════════════════════════════════════════════════════
   pap-api:
     build:
@@ -34,7 +27,7 @@ services:
     env_file:
       - .env
     ports:
-      - "${HOST_IP:-192.168.25.101}:${PAP_PORT:-8000}:8000"
+      - "${PAP_PORT:-8000}:8000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     mem_limit: 256m
@@ -46,7 +39,11 @@ services:
       retries: 3
       start_period: 20s
     networks:
-      - homelab-network
+      homelab-network:
+        aliases:
+          - pap-api
+          - api
+          - core-api
 
   # ═════════════════════════════════════════════════════════════════
   # 2. PERSONAL SERVER MANAGER (PSM — Control Plane & Management)
@@ -150,6 +147,7 @@ services:
 
   # ═════════════════════════════════════════════════════════════════
   # 3. IOT DASHBOARD (HEATPRESS FLEET MONITORING)
+  # Menggunakan PAP Core API Gateway (:8000) untuk Device Mapping & Telemetry
   # ═════════════════════════════════════════════════════════════════
   iot-telegraf:
     image: telegraf:1.29
@@ -170,49 +168,12 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
-      - iot-network
+      - homelab-network
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9273/metrics"]
       interval: 15s
       timeout: 5s
       retries: 3
-      start_period: 15s
-
-  iot-api:
-    build:
-      context: ./dashboard_iot/api
-    container_name: iot_device_mapping_api
-    restart: always
-    mem_limit: 256m
-    cpus: 0.50
-    ports:
-      - "${IOT_API_PORT:-8002}:8000"
-    volumes:
-      - ./dashboard_iot/api/data:/app/data
-      - ./dashboard_iot/api:/app/api
-    environment:
-      - PROMETHEUS_URL=${PROMETHEUS_URL:-http://host.docker.internal:9001}
-      - ONLINE_THRESHOLD_MINUTES=${ONLINE_THRESHOLD_MINUTES:-5}
-      - PAP_API_URL=${PAP_API_URL:-http://192.168.25.101:8000}
-      - PAP_API_KEY=${PAP_API_KEY:-pap_key_iot_dashboard_default_secret_key_2026}
-      - MQTT_BROKER_HOST=${MQTT_BROKER_HOST:-192.168.25.101}
-      - MQTT_TAILSCALE_HOST=${MQTT_TAILSCALE_HOST:-100.106.63.90}
-      - MQTT_BROKER_PORT=${MQTT_BROKER_PORT:-1883}
-      - MQTT_USERNAME=${MQTT_USERNAME:-useriot}
-      - MQTT_PASSWORD=${MQTT_PASSWORD:-25022002}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    networks:
-      homelab-network:
-      iot-network:
-        aliases:
-          - api
-          - iot-api
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
       start_period: 15s
 
   iot-web:
@@ -229,9 +190,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
-      - iot-network
+      - homelab-network
     depends_on:
-      iot-api:
+      pap-api:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/"]
@@ -254,8 +215,5 @@ networks:
     driver: bridge
   psm-network:
     name: psm-network
-    driver: bridge
-  iot-network:
-    name: iot-network
     driver: bridge
 

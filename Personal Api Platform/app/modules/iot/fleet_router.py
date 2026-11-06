@@ -1,6 +1,7 @@
 """Heatpress IoT Fleet Service & Routers for PAP Main API (/api/v1/iot/fleet/* and /api/devices/*)."""
 
 from datetime import datetime, timezone
+import time
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -20,6 +21,11 @@ from app.schemas import success_response
 from app.services.bootstrap import HEATPRESS_FLEET_DEVICES_SEED
 
 ALL_MQTT_METRICS = "sysctrl_.+|event_cnt_.+|event_handling_.+|machine_time_.+|heatpress_.+"
+
+_fleet_online_cache: set[str] = set()
+_fleet_online_cache_ts: float = 0.0
+_FLEET_ONLINE_CACHE_TTL: float = 10.0  # seconds
+_fleet_prom_sync_ts: float = 0.0
 
 MODEL_CONFIGS: dict[str, dict[str, Any]] = {
     "HPM 55": {
@@ -193,7 +199,12 @@ class FleetService:
             "updated_at": d.updated_at.isoformat() if d.updated_at else None,
         }
 
-    def get_online_macs(self) -> set[str]:
+    def get_online_macs(self, force: bool = False) -> set[str]:
+        global _fleet_online_cache, _fleet_online_cache_ts
+        now = time.time()
+        if not force and _fleet_online_cache and (now - _fleet_online_cache_ts) < _FLEET_ONLINE_CACHE_TTL:
+            return _fleet_online_cache
+
         online: set[str] = set()
         try:
             data = self.prometheus.instant_query(f'count by (MAC) ({{__name__=~"{ALL_MQTT_METRICS}"}})')
@@ -211,6 +222,9 @@ class FleetService:
                 meta = d.metadata_json or {}
                 mac = str(meta.get("mac_address") or d.device_uid).upper()
                 online.add(mac)
+
+        _fleet_online_cache = online
+        _fleet_online_cache_ts = now
         return online
 
     def list_fleet_devices(
@@ -270,7 +284,13 @@ class FleetService:
         devices = self.list_fleet_devices(limit=500)
         return {d["mac_address"]: bool(d.get("online")) for d in devices}
 
-    def sync_from_prometheus(self) -> list[dict[str, Any]]:
+    def sync_from_prometheus(self, force: bool = False) -> list[dict[str, Any]]:
+        global _fleet_prom_sync_ts
+        now = time.time()
+        if not force and (now - _fleet_prom_sync_ts) < 60.0:
+            return self.list_fleet_devices(limit=500)
+        _fleet_prom_sync_ts = now
+
         project = self.ensure_iot_project_and_seed()
         try:
             data = self.prometheus.instant_query("count by (MAC, model) (sysctrl_STS)")
@@ -336,7 +356,7 @@ class FleetService:
         return self.list_fleet_devices(limit=500)
 
     def get_hierarchy(self) -> dict[str, Any]:
-        devices = self.sync_from_prometheus()
+        devices = self.list_fleet_devices(limit=500)
         model_devices: dict[str, list[dict[str, Any]]] = {
             "HPM 55": [],
             "AF-450": [],
@@ -578,7 +598,7 @@ def v1_sync_fleet_prometheus(
     principal: Principal = Depends(require_any_scope("iot:read", "iot:manage", "metrics:read")),
     db: Session = Depends(get_db),
 ):
-    devices = FleetService(db).sync_from_prometheus()
+    devices = FleetService(db).sync_from_prometheus(force=True)
     return success_response(
         data={"devices": devices, "count": len(devices)},
         message=f"Synchronized {len(devices)} fleet devices with Prometheus",
@@ -619,7 +639,7 @@ def compat_device_hierarchy(db: Session = Depends(get_db)):
 
 @compat_devices_router.post("/api/devices/sync-prometheus")
 def compat_sync_prometheus(db: Session = Depends(get_db)):
-    devices = FleetService(db).sync_from_prometheus()
+    devices = FleetService(db).sync_from_prometheus(force=True)
     return {
         "status": "success",
         "source": "personal-api-platform",

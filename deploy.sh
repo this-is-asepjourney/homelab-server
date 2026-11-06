@@ -235,13 +235,13 @@ deploy_containers() {
     log_success "Sintaks docker-compose.yml valid."
 
     # Build container
-    log_info "Membangun Docker image (pap-api, psm-api, psm-web, psm-agent, iot-api, iot-web)..."
+    log_info "Membangun Docker image (pap-api, psm-api, psm-web, psm-agent, iot-web)..."
     docker compose build --parallel
 
     # Bersihkan kontainer lama jika ada bentrok nama dari project standalone sebelumnya
-    log_info "Membersihkan kontainer lama yang masih aktif agar tidak bentrok..."
+    log_info "Membersihkan kontainer lama (termasuk mematikan iot_device_mapping_api zombie)..."
     docker rm -f psm-api psm-web psm-agent pap-api iot_telegraf iot_device_mapping_api iot_dashboard_web 2>/dev/null || true
-    docker network rm psm-network 2>/dev/null || true
+    docker network rm psm-network iot-network 2>/dev/null || true
 
     # Jalankan container
     log_info "Menjalankan container di background..."
@@ -258,9 +258,9 @@ verify_deployment() {
 
     local endpoints=(
         "http://$HOST_IP:8000/health|PAP Core API Gateway (:8000)"
+        "http://$HOST_IP:8000/api/health|PAP Native IoT Fleet Health (:8000)"
         "http://127.0.0.1:8001/health|PSM Control Plane API (:8001)"
         "http://127.0.0.1:3005|PSM Web Dashboard (:3005)"
-        "http://127.0.0.1:8002/health|IoT Device Mapping API (:8002)"
         "http://127.0.0.1:8088|IoT Dashboard Web Hub (:8088)"
         "http://127.0.0.1:9273/metrics|IoT Telegraf Exporter (:9273)"
     )

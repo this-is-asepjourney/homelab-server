@@ -1,8 +1,10 @@
 """FastAPI application entry point for Personal API Platform (PAP)."""
 
+import os
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, FastAPI
+import httpx
+from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
@@ -93,6 +95,49 @@ def create_app() -> FastAPI:
     api_v1.include_router(audit_router)
 
     application.include_router(api_v1)
+
+    # ── PSM Gateway Forwarding ─────────────────────────
+    # Allows PAP Core API (:8000) to act as central reverse-proxy for PSM control plane
+    @application.api_route(
+        "/psm/{path:path}",
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        include_in_schema=False,
+    )
+    async def psm_gateway_proxy(request: Request, path: str):
+        psm_base = os.getenv("PSM_API_URL", "http://psm-api:8000").rstrip("/")
+        target_url = f"{psm_base}/{path}"
+        headers = dict(request.headers)
+        headers.pop("host", None)
+        try:
+            body = await request.body()
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                res = await client.request(
+                    method=request.method,
+                    url=target_url,
+                    headers=headers,
+                    params=request.query_params,
+                    content=body,
+                )
+                return Response(
+                    content=res.content,
+                    status_code=res.status_code,
+                    headers=dict(res.headers),
+                    media_type=res.headers.get("content-type"),
+                )
+        except Exception as e:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=502, detail=f"PSM service unavailable via gateway: {e}")
+
+    @application.get("/install-agent.sh", include_in_schema=False)
+    async def install_agent_script():
+        psm_base = os.getenv("PSM_API_URL", "http://psm-api:8000").rstrip("/")
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                res = await client.get(f"{psm_base}/install-agent.sh")
+                return Response(content=res.content, status_code=res.status_code, media_type="text/x-shellscript")
+        except Exception:
+            return Response(content="#!/bin/bash\necho 'PSM service initializing...'\n", media_type="text/x-shellscript")
+
     return application
 
 
