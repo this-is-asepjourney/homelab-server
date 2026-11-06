@@ -1,0 +1,22 @@
+════════════════════════════════════════════════════════════════════
+          DEPLOYMENT HOMELAB SERVER SELESAI DENGAN SUKSES!
+════════════════════════════════════════════════════════════════════
+
+Aplikasi dapat diakses melalui alamat berikut:
+  • PAP Core API Gateway       : http://192.168.25.101:8000/docs
+  • PSM Web Dashboard          : http://192.168.25.101:3005
+  • PSM Control Plane API      : http://192.168.25.101:8001/docs
+  • IoT Dashboard Web Hub      : http://192.168.25.101:8088
+  • IoT Device Mapping API     : http://192.168.25.101:8002/docs
+  • Grafana Utama Homelab      : http://192.168.25.101:3001
+  • Prometheus Server          : http://192.168.25.101:9001
+  • Uptime Kuma Health Hub     : http://192.168.25.101:3002
+
+Perintah harian yang berguna:
+  Cek status kesehatan      : python3 homelab.py status
+  Cek log realtime          : docker compose logs -f
+  Restart service tertentu  : docker compose restart <service_name>
+  Hentikan stack            : docker compose down
+
+════════════════════════════════════════════════════════════════════
+fa@fa:/opt/projects/homelab-server$
