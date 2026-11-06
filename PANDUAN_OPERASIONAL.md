@@ -53,20 +53,19 @@ flowchart TD
     end
 
     subgraph STACK_HOMELAB["Stack Docker Homelab Terpadu (docker-compose.yml)"]
-        subgraph MODUL_IOT["Modul IoT Fleet"]
+        subgraph MODUL_CORE["Modul Core API Gateway (Pusat Terpadu)"]
+            PAP_API["pap-api (:8000)<br/>Central Core API Gateway<br/>• Native IoT Fleet Engine<br/>• Business Integrations & Auth<br/>• PSM Control Gateway"]
+        end
+
+        subgraph MODUL_IOT["Modul IoT Fleet Dashboard"]
             TG["iot-telegraf (:9273)<br/>MQTT Exporter"]
-            IOT_API["iot-api (:8002)<br/>FastAPI Registry"]
-            IOT_WEB["iot-web (:8088)<br/>Nginx Hub"]
+            IOT_WEB["iot_dashboard_web (:8088)<br/>Nginx Web Hub"]
         end
 
-        subgraph MODUL_PSM["Modul PSM"]
-            PSM_API["psm-api (:8001)<br/>Control Plane"]
-            PSM_WEB["psm-web (:3005)<br/>Next.js UI"]
-            PSM_AGT["psm-agent<br/>Docker Socket"]
-        end
-
-        subgraph MODUL_PAP["Modul PAP"]
-            PAP_API["pap-api (:8000)<br/>Core API Gateway"]
+        subgraph MODUL_PSM["Modul Personal Server Manager"]
+            PSM_API["psm-api (:8001)<br/>Control Plane Backend"]
+            PSM_WEB["psm-web (:3005)<br/>Next.js Web UI"]
+            PSM_AGT["psm-agent<br/>Docker Socket Agent"]
         end
     end
 
@@ -74,8 +73,9 @@ flowchart TD
     ESP1 & ESP2 & ESP3 -->|MQTT JSON Telemetry| MQTT
     MQTT -->|Subscribe heatpress/#| TG
     PROM -->|Scrape metrics /metrics| TG
-    IOT_API -->|PromQL Query Device Status| PROM
-    IOT_WEB -->|Reverse Proxy /api/| IOT_API
+    PAP_API -->|PromQL Query Device Status| PROM
+    PAP_API -->|PostgreSQL Data| PG
+    IOT_WEB -->|Reverse Proxy /api/| PAP_API
     IOT_WEB -->|Reverse Proxy /grafana/| GRAF
     GRAF -->|Read metrics| PROM
 
@@ -83,9 +83,7 @@ flowchart TD
     PSM_API -->|Query Host Health| PROM
     PSM_WEB -->|API Calls & WebSocket| PSM_API
     PSM_AGT -->|Report Status| PSM_API
-
-    PAP_API -.->|Inter-Service Auth Token| IOT_API
-    PAP_API -.->|Inter-Service Auth Token| PSM_API
+    PAP_API -.->|Gateway Route /psm/*| PSM_API
 ```
 
 ---
@@ -106,16 +104,18 @@ flowchart TD
 | **Cockpit** | HTTPS | `9090` | `*:9090` | Host Service (`pid 5321`) | Server management Linux |
 | **MicroK8s** | HTTPS | `16443` | `*:16443` | Snap Service (`pid 4123673`)| Kubernetes cluster |
 
-### B. Kontainer Aplikasi Master Stack
+### B. Kontainer Aplikasi Master Stack (Unified Architecture)
 | Nama Container | Port Host | Port Kontainer | Jaringan Internal | Keterangan |
 | :--- | :--- | :--- | :--- | :--- |
-| **`pap-api`** | `192.168.25.101:8000` | `8000` | `homelab-network` | Personal API Platform Gateway |
-| **`psm-api`** | `0.0.0.0:8001` | `8000` | `homelab-network`, `psm-network` | Personal Server Manager Backend |
+| **`pap-api`** | `0.0.0.0:8000` | `8000` | `homelab-network` | **Central Core API Gateway** (Native IoT Fleet + Auth + PSM Gateway) |
+| **`psm-api`** | `0.0.0.0:8001` | `8000` | `homelab-network`, `psm-network` | Personal Server Manager Control Plane Backend |
 | **`psm-web`** | `0.0.0.0:3005` | `3005` | `psm-network` | Personal Server Manager Web (Next.js) |
 | **`psm-agent`** | - | - | `psm-network` | Docker Host Agent Controller |
-| **`iot_telegraf`** | `0.0.0.0:9273` | `9273` | `iot-network` | MQTT to Prometheus Exporter |
-| **`iot_device_mapping_api`** | `0.0.0.0:8002` | `8000` | `homelab-network`, `iot-network` | Device Registry & Status Engine |
-| **`iot_dashboard_web`** | `0.0.0.0:8088` | `80` | `iot-network` | Nginx Hub & Reverse Proxy |
+| **`iot_telegraf`** | `0.0.0.0:9273` | `9273` | `homelab-network` | MQTT to Prometheus Exporter |
+| **`iot_dashboard_web`** | `0.0.0.0:8088` | `80` | `homelab-network` | Nginx Hub (Reverse proxy langsung ke `pap-api:8000`) |
+
+> [!NOTE]
+> Container `iot_device_mapping_api` telah **dipensiunkan & disatukan ke dalam `pap-api`**. Tidak ada lagi runtime Python duplikat untuk device mapping, menghemat ~450MB RAM dan mengeliminasi masalah CPU spike secara permanen.
 
 ---
 
