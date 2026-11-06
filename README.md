@@ -26,14 +26,23 @@ Server telah memiliki layanan-layanan inti yang berjalan di level host atau dock
 Stack Docker Homelab ini hanya menjalankan **kontainer aplikasi murni** dari ketiga proyek:
 
 ```text
-homelab-server/
-├── Personal Api Platform/      -> pap-api (Port 8000)
-├── Personal_Server_Manager/    -> psm-api (Port 8001), psm-web (Port 3005), psm-agent
-├── dashboard_iot/              -> iot-telegraf (Port 9273), iot-api (Port 8002), iot-web (Port 8088)
-├── docker-compose.yml          -> Master Compose terpadu
-├── homelab.py                  -> CLI Manajemen Terpadu Homelab
-├── .env                        -> Konfigurasi IP, port, token, dan kredensial
-└── port.md                     -> Pemetaan port aktual server fa
+/opt/
+├── homelab/                         <- Layanan Infrastruktur Eksisting (Docker)
+│   ├── databases/                   <- PostgreSQL (:5432) & MySQL (:3306)
+│   ├── grafana/                     <- Grafana Utama (:3001)
+│   ├── mosquitto/                   <- Mosquitto MQTT Broker (:1883)
+│   ├── prometheus/                  <- Prometheus Docker (:9001, config/prometheus.yml)
+│   └── uptime-kuma/                 <- Uptime Kuma (:3002)
+├── dockge/                          <- Dockge Stack Manager
+└── projects/homelab-server/         <- REPOSITORY UTAMA PROYEK
+    ├── deploy.sh                    <- Script Deployment Otomatis Server
+    ├── docker-compose.yml           <- Master Compose Terpadu (7 Containers)
+    ├── homelab.py                   <- CLI Manajemen Terpadu Homelab
+    ├── PANDUAN_OPERASIONAL.md       <- Panduan Lengkap Pengoperasian
+    ├── data/mapping.db              <- SQLite Device Registry
+    ├── Personal Api Platform/       <- pap-api (Port :8000)
+    ├── Personal_Server_Manager/     <- psm-api (:8001), psm-web (:3005), psm-agent
+    └── dashboard_iot/               <- iot-telegraf (:9273), iot-api (:8002), iot-web (:8088)
 ```
 
 ### Matriks Port Aplikasi
@@ -62,7 +71,17 @@ Untuk mencegah konflik nama (seperti `api` yang digunakan oleh PSM Web dan IoT W
 
 ## 4. Cara Menjalankan
 
-### Opsi A: Menggunakan CLI Terpadu (`homelab.py`)
+### Opsi Utama: Deployment Otomatis via `deploy.sh` (Sangat Direkomendasikan)
+
+Script ini dirancang khusus untuk struktur `/opt` di server `fa`. Menangani seluruh konfigurasi Prometheus (`/opt/homelab/prometheus/config/prometheus.yml`), inisialisasi database `psm`, build container, dan verifikasi healthcheck:
+
+```bash
+cd /opt/projects/homelab-server
+chmod +x deploy.sh
+./deploy.sh
+```
+
+### Opsi B: Menggunakan CLI Terpadu (`homelab.py`)
 
 CLI ini otomatis memvalidasi dependensi dan memeriksa ketersediaan port:
 
@@ -83,7 +102,7 @@ python homelab.py import-grafana --token <GRAFANA_SERVICE_TOKEN>
 python homelab.py down
 ```
 
-### Opsi B: Menggunakan Docker Compose Standar
+### Opsi C: Menggunakan Docker Compose Standar
 
 ```bash
 # Menjalankan seluruh stack
@@ -102,23 +121,28 @@ docker compose down
 
 ### Langkah 1: Hubungkan Prometheus Docker (:9001) ke Telegraf (:9273)
 
-Tambahkan blok job scrape berikut ke konfigurasi Prometheus eksisting di server (misal `/var/snap/prometheus/current/prometheus.yml`):
+Tambahkan blok job scrape berikut ke file /opt/homelab/prometheus/config/prometheus.yml:
 
 ```yaml
 scrape_configs:
   - job_name: 'iot_heatpress'
     scrape_interval: 5s
+    scrape_timeout: 4s
     static_configs:
-      - targets: ['127.0.0.1:9273']
+      - targets: ['192.168.25.101:9273']
         labels:
           environment: 'homelab'
           service: 'heatpress_iot'
 ```
 
-Lalu restart atau reload Prometheus:
+Lalu reload atau restart container Prometheus:
 
 ```bash
-sudo systemctl restart snap.prometheus.prometheus
+# Opsi A: Reload via HTTP
+curl -X POST http://192.168.25.101:9001/-/reload
+
+# Opsi B: Restart container Prometheus di /opt/homelab/prometheus
+cd /opt/homelab/prometheus && docker compose restart
 ```
 
 ### Langkah 2: Impor Dashboard ke Grafana Eksisting (:3001)

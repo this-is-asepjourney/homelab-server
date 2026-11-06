@@ -127,30 +127,87 @@ flowchart TD
 3. **Docker Prometheus & Grafana**: Service monitoring utama yang sudah berjalan di Docker host.
 4. **Hak Akses Sudo**: Diperlukan untuk restart container atau mengelola network socket.
 
-### Struktur Direktori Proyek
+### Struktur Direktori Server `/opt` (Aktual di Server `fa`)
+
 ```text
-/repository/homelab-server/
-├── .env                       <- File konfigurasi rahasia & port aktif
-├── .env.example               <- Template konfigurasi
-├── docker-compose.yml         <- Orkestrasi Docker tunggal (Master Stack)
-├── homelab.py                 <- CLI Manajemen Terpadu Homelab
-├── port.md                    <- Audit port aktual server
-├── README.md                  <- Ringkasan proyek
-├── PANDUAN_OPERASIONAL.md      <- Dokumen ini
-├── Personal Api Platform/     <- Modul PAP (FastAPI)
-├── Personal_Server_Manager/   <- Modul PSM (FastAPI + Next.js + Agent)
-└── dashboard_iot/             <- Modul IoT Fleet (Telegraf + FastAPI + Web Hub + Dashboards)
+/opt/
+├── dockge/                          <- Dockge Stack & Container Manager UI
+│   ├── compose.yaml
+│   └── data/ (dockge.db)
+├── homelab/                         <- Layanan Infrastruktur Eksisting (Docker Stacks)
+│   ├── databases/                   <- Database Engine (PostgreSQL :5432 & MySQL :3306)
+│   │   ├── compose.yaml
+│   │   └── docker-compose.yaml
+│   ├── grafana/                     <- Grafana Utama (:3001)
+│   │   └── compose.yaml
+│   ├── mosquitto/                   <- Mosquitto MQTT Broker (:1883)
+│   │   ├── compose.yaml
+│   │   ├── config/ (mosquitto.conf, passwordfile)
+│   │   └── data/ (mosquitto.db)
+│   ├── prometheus/                  <- Prometheus Docker (:9001)
+│   │   ├── config/
+│   │   │   └── prometheus.yml       <- File konfigurasi scrape target
+│   │   ├── data/ (TSDB chunks, wal)
+│   │   └── docker-compose.yml
+│   └── uptime-kuma/                 <- Uptime Kuma Health Hub (:3002)
+│       └── compose.yaml
+└── projects/
+    └── homelab-server/              <- REPOSITORY PROYEK KITA (Master Stack)
+        ├── dashboard_iot/           <- Modul Heatpress IoT Monitoring
+        ├── data/
+        │   └── mapping.db           <- Database SQLite registrasi perangkat
+        ├── Personal Api Platform/   <- Modul PAP (Central API Gateway :8000)
+        ├── Personal_Server_Manager/ <- Modul PSM (API :8001, Web :3005, Agent)
+        ├── docker-compose.yml       <- Master Docker Compose terpadu
+        ├── homelab.py               <- CLI Manajemen Terpadu Homelab
+        ├── deploy.sh                <- Skrip Deployment Otomatis Server
+        ├── .env                     <- File environment aktif
+        ├── .env.example             <- Template environment
+        ├── port.md                  <- Audit port aktual server fa
+        ├── README.md                <- Ringkasan proyek
+        └── PANDUAN_OPERASIONAL.md   <- Dokumen panduan ini
 ```
 
 ---
 
-## 4. Prosedur Deployment Pertama Kali
+## 4. Prosedur Deployment di Server `fa`
 
-Ikuti 5 langkah berikut untuk menyiapkan seluruh sistem dari nol:
+Deployment dapat dilakukan dengan dua cara: **Metode A (Otomatis)** menggunakan script `deploy.sh` atau **Metode B (Manual)** jika ingin mengeksekusi langkah per langkah.
 
-### Langkah 1: Siapkan Konfigurasi Lingkungan (`.env`)
-Salin file template `.env.example` ke `.env` di root repository:
+---
+
+### METODE A: Deployment Otomatis via `deploy.sh` (SANGAT DIREKOMENDASIKAN)
+
+Script [`deploy.sh`](file:///d:/repository/homelab-server/deploy.sh) dirancang khusus untuk struktur `/opt` di server `fa`. Script ini secara otomatis memeriksa dependensi, memperbarui scrape config Prometheus eksisting di `/opt/homelab/prometheus/config/prometheus.yml`, menyiapkan database `psm`, memvalidasi `.env`, mem-build dan menjalankan seluruh kontainer, serta mengimpor dashboard ke Grafana.
+
+Cukup jalankan satu baris perintah berikut di server `fa`:
+
 ```bash
+cd /opt/projects/homelab-server
+chmod +x deploy.sh
+./deploy.sh
+```
+
+#### Apa saja yang dilakukan `deploy.sh` secara otomatis?
+1. **Validasi Prasyarat**: Memastikan Docker, Docker Compose v2, Python 3, dan Curl tersedia.
+2. **Audit Layanan Eksisting**: Memeriksa `/opt/homelab/databases`, `/opt/homelab/mosquitto`, `/opt/homelab/grafana`, dan `/opt/homelab/prometheus`.
+3. **Konfigurasi Prometheus Otomatis**: Memeriksa `/opt/homelab/prometheus/config/prometheus.yml`. Jika job `iot_heatpress` belum ada, script membuat backup dan otomatis menambahkan target scrape Telegraf (`192.168.25.101:9273`), lalu me-reload Prometheus via HTTP API atau `docker compose restart`.
+4. **Setup Database PostgreSQL**: Memeriksa dan membuat database `psm` di server PostgreSQL host jika belum tersedia.
+5. **Setup Environment**: Menyiapkan file `.env` dari `.env.example` dan menyinkronkan file SQLite `data/mapping.db` dengan `dashboard_iot/api/data/mapping.db`.
+6. **Orkestrasi Docker**: Menjalankan `docker compose config`, membangun image, dan mengeksekusi `docker compose up -d --remove-orphans`.
+7. **Healthcheck Loop**: Menunggu dan memvalidasi ke-6 endpoint layanan hingga semuanya berstatus `[ONLINE]`.
+8. **Impor Grafana Interaktif**: Menawarkan opsi otomatis untuk langsung mengimpor 4 dashboard Heatpress ke Grafana `:3001` menggunakan API Token atau login admin.
+
+---
+
+### METODE B: Prosedur Deployment Manual (Langkah demi Langkah)
+
+Jika Anda ingin menjalankan proses secara manual tanpa script `deploy.sh`:
+
+#### Langkah 1: Siapkan Konfigurasi Lingkungan (`.env`)
+Salin file template `.env.example` ke `.env` di `/opt/projects/homelab-server`:
+```bash
+cd /opt/projects/homelab-server
 cp .env.example .env
 ```
 Pastikan variabel utama di dalam `.env` sudah benar:
@@ -163,21 +220,19 @@ Pastikan variabel utama di dalam `.env` sudah benar:
 - `PROMETHEUS_URL=http://host.docker.internal:9001`
 - `EXISTING_GRAFANA_URL=http://192.168.25.101:3001`
 
-### Langkah 2: Buat Database PostgreSQL untuk PSM
+#### Langkah 2: Buat Database PostgreSQL untuk PSM
 Pastikan database `psm` sudah dibuat di PostgreSQL host:
 ```bash
-# Jalankan psql di host
-sudo -u postgres psql -c "CREATE DATABASE psm OWNER appuser;"
-# Berikan hak akses
-sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE psm TO appuser;"
+# Eksekusi via psql di server host:
+PGPASSWORD="admin12345" psql -h 192.168.25.101 -p 5432 -U appuser -d postgres -c "CREATE DATABASE psm;"
 ```
 
-### Langkah 3: Konfigurasikan Prometheus Docker untuk Scrape Telegraf
-Buka file konfigurasi `prometheus.yml` yang di-mount ke container Prometheus Docker Anda (misal `/opt/prometheus/prometheus.yml`, `~/prometheus/prometheus.yml`, atau direktori volume Prometheus terkait):
+#### Langkah 3: Konfigurasikan Prometheus Docker untuk Scrape Telegraf
+Buka file konfigurasi `prometheus.yml` di `/opt/homelab/prometheus/config/prometheus.yml`:
 ```bash
-sudo nano /opt/prometheus/prometheus.yml
+sudo nano /opt/homelab/prometheus/config/prometheus.yml
 ```
-Tambahkan job `iot_heatpress` di bawah blok `scrape_configs` (gunakan IP LAN `192.168.25.101` atau `host.docker.internal` agar container Prometheus dapat menjangkau Telegraf di host):
+Tambahkan job `iot_heatpress` di bawah blok `scrape_configs`:
 ```yaml
 scrape_configs:
   - job_name: 'iot_heatpress'
@@ -189,39 +244,36 @@ scrape_configs:
           environment: 'homelab'
           service: 'heatpress_iot'
 ```
-Simpan file, lalu reload atau restart container Prometheus Docker Anda:
+Simpan file (`Ctrl+O`, `Enter`, `Ctrl+X`), lalu reload atau restart Prometheus:
 ```bash
-# Opsi A: Restart container Prometheus Docker
-docker restart <nama_container_prometheus>
-
-# Opsi B: Reload konfigurasi secara realtime via HTTP (jika flag --web.enable-lifecycle aktif)
+# Opsi A: Reload via HTTP (jika flag lifecycle aktif):
 curl -X POST http://192.168.25.101:9001/-/reload
+
+# Opsi B: Restart container Prometheus Docker:
+cd /opt/homelab/prometheus && docker compose restart
 ```
 Verifikasi target aktif di browser: `http://192.168.25.101:9001/targets` (akan berstatus UP setelah Telegraf dijalankan).
 
-### Langkah 4: Build dan Jalankan Master Stack
-Gunakan CLI `homelab.py` atau Docker Compose:
+#### Langkah 4: Build dan Jalankan Master Stack
 ```bash
-# Menggunakan CLI Manajemen:
-python3 homelab.py up
-
-# Atau menggunakan Docker Compose langsung:
+cd /opt/projects/homelab-server
 docker compose up -d --build
 ```
-
 Periksa kontainer yang sedang berjalan:
 ```bash
 docker compose ps
 ```
 Pastikan 7 kontainer (`pap-api`, `psm-api`, `psm-web`, `psm-agent`, `iot-telegraf`, `iot-api`, `iot-web`) berstatus `Up (healthy)`.
 
-### Langkah 5: Impor Dashboard ke Grafana Eksisting (:3001)
+#### Langkah 5: Impor Dashboard ke Grafana Eksisting (:3001)
 1. Buka Grafana di browser: `http://192.168.25.101:3001`
 2. Masuk ke **Administration** → **Users and access** → **Service Accounts** (atau API Keys).
 3. Buat Service Account baru dengan role **Admin** / **Editor**, lalu salin Token yang dihasilkan.
 4. Jalankan script import otomatis:
 ```bash
 python3 homelab.py import-grafana --host 192.168.25.101 --port 3001 --token <TOKEN_GRAFANA_ANDA>
+```
+Script ini otomatis membuat folder **`Heatpress Fleet Monitoring`** dan mengimpor 4 dashboard analitik.
 ```
 Script ini akan:
 - Membuat folder baru di Grafana: **`Heatpress Fleet Monitoring`**
@@ -344,14 +396,14 @@ PAP bertindak sebagai API gateway dan penyedia token integrasi bersama. Kunci AP
 ### A. Komponen yang Perlu Dibackup
 
 1. **Database SQLite IoT Mapping**:
-   - Lokasi: `dashboard_iot/api/data/devices.db`
+   - Lokasi: `/opt/projects/homelab-server/data/mapping.db` & `/opt/projects/homelab-server/dashboard_iot/api/data/mapping.db`
    - File ini menyimpan seluruh relasi MAC Address ↔ Nama Mesin ↔ Lokasi.
 2. **Database PostgreSQL Host (PSM & App Data)**:
    - Database: `psm`
 3. **Volume Persisten PSM**:
    - Volume: `homelab-server_psm-storage` (atau `psm-storage`)
 4. **File Konfigurasi**:
-   - File `.env` di root repository.
+   - File `/opt/projects/homelab-server/.env` dan `/opt/homelab/prometheus/config/prometheus.yml`.
 
 ### B. Perintah Backup Otomatis (Bash Script)
 
@@ -360,14 +412,15 @@ PAP bertindak sebagai API gateway dan penyedia token integrasi bersama. Kunci AP
 BACKUP_DIR="/home/fa/backups/homelab_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$BACKUP_DIR"
 
-echo "[1/4] Backup SQLite IoT Registry..."
-cp /repository/homelab-server/dashboard_iot/api/data/devices.db "$BACKUP_DIR/devices.db"
+echo "[1/4] Backup SQLite IoT Registry (mapping.db)..."
+cp /opt/projects/homelab-server/data/mapping.db "$BACKUP_DIR/mapping.db" || cp /opt/projects/homelab-server/dashboard_iot/api/data/mapping.db "$BACKUP_DIR/mapping.db"
 
 echo "[2/4] Backup Database PostgreSQL Host (psm)..."
-sudo -u postgres pg_dump -d psm -F c -b -v -f "$BACKUP_DIR/psm_database.dump"
+PGPASSWORD="admin12345" pg_dump -h 192.168.25.101 -U appuser -d psm -F c -b -v -f "$BACKUP_DIR/psm_database.dump"
 
-echo "[3/4] Backup File Environment..."
-cp /repository/homelab-server/.env "$BACKUP_DIR/.env.backup"
+echo "[3/4] Backup File Environment & Prometheus Config..."
+cp /opt/projects/homelab-server/.env "$BACKUP_DIR/.env.backup"
+cp /opt/homelab/prometheus/config/prometheus.yml "$BACKUP_DIR/prometheus.yml.backup"
 
 echo "[4/4] Backup Volume Storage PSM..."
 docker run --rm -v homelab-server_psm-storage:/data -v "$BACKUP_DIR":/backup alpine tar czf /backup/psm_storage.tar.gz -C /data .
@@ -379,10 +432,11 @@ echo "Backup berhasil disimpan di: $BACKUP_DIR"
 
 ```bash
 # 1. Restore SQLite IoT Registry:
-cp /path/to/backup/devices.db /repository/homelab-server/dashboard_iot/api/data/devices.db
+cp /path/to/backup/mapping.db /opt/projects/homelab-server/data/mapping.db
+cp /path/to/backup/mapping.db /opt/projects/homelab-server/dashboard_iot/api/data/mapping.db
 
 # 2. Restore PostgreSQL Database:
-sudo -u postgres pg_restore -d psm --clean --if-exists /path/to/backup/psm_database.dump
+PGPASSWORD="admin12345" pg_restore -h 192.168.25.101 -U appuser -d psm --clean --if-exists /path/to/backup/psm_database.dump
 
 # 3. Restore Volume Storage PSM:
 docker run --rm -v homelab-server_psm-storage:/data -v /path/to/backup:/backup alpine tar xzf /backup/psm_storage.tar.gz -C /data
