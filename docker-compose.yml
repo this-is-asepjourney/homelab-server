@@ -209,11 +209,11 @@ services:
           - api
           - iot-api
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 20s
+      start_period: 15s
 
   iot-web:
     image: nginx:alpine
