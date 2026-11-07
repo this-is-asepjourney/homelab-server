@@ -66,3 +66,4 @@ def download_hosts_file():
         media_type="text/plain; charset=utf-8",
         headers={"Content-Disposition": "attachment; filename=homelab_hosts.txt"},
     )
+

@@ -302,3 +302,4 @@ server {{
             "domain_zone": ".homelab (and .fa.local)",
             "total_domains_active": len(cls.list_domains()),
         }
+
