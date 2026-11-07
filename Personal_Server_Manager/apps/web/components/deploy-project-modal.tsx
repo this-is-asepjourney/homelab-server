@@ -62,19 +62,21 @@ export function DeployProjectModal({
   const [commitHash, setCommitHash] = useState('');
   const [zipFile, setZipFile] = useState<File | null>(null);
 
-  // Step 2: Ports
+  // Step 2: Ports & Local DNS
   const [hostPort, setHostPort] = useState('3000');
   const [containerPort, setContainerPort] = useState('3000');
   const [additionalPorts, setAdditionalPorts] = useState<Array<{ host: string; container: string }>>([]);
+  const [domain, setDomain] = useState(existingProject?.domain || '');
 
-  // Step 3: Environment & DB
+  // Step 3: Environment & Flexible DB
+  const [dbType, setDbType] = useState<'postgres' | 'mysql' | 'sqlite' | 'none'>(existingProject?.db_type || 'postgres');
   const [envMode, setEnvMode] = useState<'table' | 'raw'>('table');
   const [envRows, setEnvRows] = useState<Array<{ key: string; value: string; isSecret?: boolean }>>([
     { key: 'NODE_ENV', value: 'production', isSecret: false },
   ]);
   const [rawEnvText, setRawEnvText] = useState('');
-  const [autoProvisionDb, setAutoProvisionDb] = useState(true);
-  const [customDbName, setCustomDbName] = useState('');
+  const [autoProvisionDb, setAutoProvisionDb] = useState(existingProject?.db_type ? existingProject.db_type !== 'none' : true);
+  const [customDbName, setCustomDbName] = useState(existingProject?.db_name || '');
   const [showSecrets, setShowSecrets] = useState(false);
 
   // Submission
@@ -91,6 +93,12 @@ export function DeployProjectModal({
       setSourceType(existingProject.source_type || 'git');
       setRepositoryUrl(existingProject.repository_url || '');
       setBranch(existingProject.branch || 'main');
+      if (existingProject.domain) setDomain(existingProject.domain);
+      if (existingProject.db_type) {
+        setDbType(existingProject.db_type);
+        setAutoProvisionDb(existingProject.db_type !== 'none');
+      }
+      if (existingProject.db_name) setCustomDbName(existingProject.db_name);
 
       // Parse existing port mappings (e.g. "8080:3000" or "3000:3000")
       if (existingProject.port_mappings) {
@@ -143,6 +151,14 @@ export function DeployProjectModal({
   };
 
   // Auto-name detection from Git URL or ZIP
+  const handleNameInput = (val: string) => {
+    setName(val);
+    if (!existingProject && (!domain || domain.endsWith('.homelab') || domain.endsWith('.fa.local'))) {
+      const slug = val.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^-+|-+$/g, '');
+      setDomain(slug ? `${slug}.homelab` : '');
+    }
+  };
+
   const handleRepoUrlChange = (url: string) => {
     setRepositoryUrl(url);
     if (!name || name === 'my-app') {
@@ -151,7 +167,9 @@ export function DeployProjectModal({
         const segs = clean.split('/');
         const last = segs[segs.length - 1];
         if (last) {
-          setName(last.toLowerCase().replace(/[^a-z0-9_-]/g, '-'));
+          const cleanName = last.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+          setName(cleanName);
+          if (!domain) setDomain(`${cleanName}.homelab`);
         }
       } catch (_) {}
     }
@@ -161,7 +179,9 @@ export function DeployProjectModal({
     setZipFile(file);
     if (file && (!name || name === 'my-app')) {
       const base = file.name.replace(/\.zip$/i, '');
-      setName(base.toLowerCase().replace(/[^a-z0-9_-]/g, '-'));
+      const cleanName = base.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+      setName(cleanName);
+      if (!domain) setDomain(`${cleanName}.homelab`);
     }
   };
 
@@ -284,7 +304,10 @@ export function DeployProjectModal({
       }
 
       // Creating a new project flow
-      setDeployStatusText('Creating project record & configuring Docker network...');
+      setDeployStatusText('Creating project record, local DNS route & Docker configuration...');
+      const cleanSlug = name.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^-+|-+$/g, '');
+      const finalDomain = domain.trim() || (cleanSlug ? `${cleanSlug}.homelab` : 'app.homelab');
+
       const created = await api.createProject({
         server_id: serverId,
         name: name.trim(),
@@ -293,7 +316,9 @@ export function DeployProjectModal({
         repository_url: sourceType === 'git' ? repositoryUrl.trim() : null,
         branch: sourceType === 'git' ? branch || 'main' : null,
         port_mappings: portString,
-        auto_provision_db: autoProvisionDb,
+        domain: finalDomain,
+        db_type: dbType,
+        auto_provision_db: dbType !== 'none' && autoProvisionDb,
         database_name: customDbName.trim() || null,
         environment_variables: envVariables,
         auto_deploy: sourceType === 'git',
@@ -530,7 +555,7 @@ export function DeployProjectModal({
                     required
                     placeholder="my-awesome-app"
                     value={name}
-                    onChange={(e) => setName(e.target.value)}
+                    onChange={(e) => handleNameInput(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
@@ -656,6 +681,61 @@ export function DeployProjectModal({
                 </div>
               </div>
 
+              {/* Local DNS & Virtual Host Configuration */}
+              <div className="p-4 rounded-xl border border-indigo-500/30 bg-indigo-500/5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-bold text-indigo-400">
+                    <Globe className="w-4 h-4" />
+                    <span>🌐 Local DNS & Virtual Host Routing (Port 80)</span>
+                  </div>
+                  <span className="px-2 py-0.5 rounded text-[10px] bg-indigo-500/10 text-indigo-400 font-semibold border border-indigo-500/20">
+                    CoreDNS + Ingress Router
+                  </span>
+                </div>
+                <p className="text-xs text-gray-400">
+                  Aplikasi otomatis di-routing tanpa perlu memasukkan port di browser. Siap diakses via LAN & Tailscale.
+                </p>
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-1">
+                    Domain Lokal Aplikasi:
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="nama-project.homelab"
+                      value={domain}
+                      onChange={(e) => setDomain(e.target.value)}
+                      className="flex-1 px-3 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <div className="flex gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const slug = (name || 'app').toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^-+|-+$/g, '');
+                          setDomain(`${slug || 'app'}.homelab`);
+                        }}
+                        className="px-2 py-1.5 rounded text-[11px] border border-border bg-card hover:bg-background text-gray-400 hover:text-foreground font-mono"
+                      >
+                        .homelab
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const slug = (name || 'app').toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^-+|-+$/g, '');
+                          setDomain(`${slug || 'app'}.fa.local`);
+                        }}
+                        className="px-2 py-1.5 rounded text-[11px] border border-border bg-card hover:bg-background text-gray-400 hover:text-foreground font-mono"
+                      >
+                        .fa.local
+                      </button>
+                    </div>
+                  </div>
+                  <span className="text-[10px] text-gray-500 mt-1 block">
+                    URL Akses Browser: <span className="text-indigo-400 font-mono">http://{domain || `${name || 'app'}.homelab`}</span>
+                  </span>
+                </div>
+              </div>
+
               {/* 1-Click Preset Buttons */}
               <div className="space-y-1.5">
                 <span className="text-[11px] font-medium text-gray-400">Rekomendasi Port Populer:</span>
@@ -738,39 +818,83 @@ export function DeployProjectModal({
           {/* STEP 3: ENVIRONMENT & DATABASE */}
           {currentStep === 3 && (
             <div className="space-y-5 animate-in fade-in duration-150">
-              {/* PostgreSQL Auto-Database Provision Option */}
-              <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-3">
-                <label className="flex items-center gap-2.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={autoProvisionDb}
-                    onChange={(e) => setAutoProvisionDb(e.target.checked)}
-                    className="rounded border-border text-emerald-600 focus:ring-emerald-500 w-4 h-4"
-                  />
-                  <div className="flex items-center gap-1.5 font-semibold text-foreground text-xs">
-                    <Database className="w-4 h-4 text-emerald-500" />
-                    <span>Auto-Create & Auto-Connect Database PostgreSQL</span>
-                    <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-500 font-bold">
-                      REKOMENDASI
-                    </span>
+              {/* Flexible Multi-Database Provision Option */}
+              <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-bold text-emerald-500">
+                    <Database className="w-4 h-4" />
+                    <span>Flexible Database Engine (Multi-DB)</span>
                   </div>
-                </label>
-                {autoProvisionDb && (
-                  <div className="pl-6 space-y-2 text-xs">
-                    <p className="text-gray-400 text-[11px]">
-                      PSM akan otomatis membuat database di server PostgreSQL dan menginjeksi kredensial lengkap (
-                      <code>DATABASE_URL</code>, <code>DB_CONNECTION=pgsql</code>, <code>DB_HOST</code>, dll.) ke container Docker.
-                    </p>
-                    <div>
-                      <label className="block text-[11px] text-gray-400 mb-1">Custom Database Name (opsional):</label>
-                      <input
-                        type="text"
-                        placeholder={`db_${(name || 'app').toLowerCase().replace(/[^a-z0-9_]/g, '_')}`}
-                        value={customDbName}
-                        onChange={(e) => setCustomDbName(e.target.value)}
-                        className="w-full px-3 py-1.5 rounded-lg bg-background border border-border text-foreground font-mono text-xs"
-                      />
+                  <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-500 font-bold border border-emerald-500/20">
+                    Auto-Provisioning
+                  </span>
+                </div>
+                <p className="text-xs text-gray-400">
+                  Pilih database untuk project Anda. PSM otomatis membuatkan schema/database baru dan menginjeksi variabel kredensial.
+                </p>
+
+                {/* DB Engine Radio Cards */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  {[
+                    { id: 'postgres', label: 'PostgreSQL', desc: 'Port 5432 (Shared Host)', badge: 'Default' },
+                    { id: 'mysql', label: 'MySQL', desc: 'Port 3306 (Shared Host)', badge: 'Fleksibel' },
+                    { id: 'sqlite', label: 'SQLite', desc: 'Embedded (/data/sqlite)', badge: 'Ringan' },
+                    { id: 'none', label: 'Stateless', desc: 'Tanpa Database Server', badge: 'Worker/UI' },
+                  ].map((engine) => (
+                    <button
+                      key={engine.id}
+                      type="button"
+                      onClick={() => {
+                        setDbType(engine.id as any);
+                        setAutoProvisionDb(engine.id !== 'none');
+                      }}
+                      className={`p-3 rounded-xl border text-left flex flex-col justify-between transition-all ${
+                        dbType === engine.id
+                          ? 'border-emerald-500 bg-emerald-500/10 text-foreground ring-1 ring-emerald-500'
+                          : 'border-border bg-card/60 hover:bg-card text-gray-400 hover:text-foreground'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full mb-1">
+                        <span className="font-bold text-xs text-foreground">{engine.label}</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-background/80 text-emerald-400 border border-emerald-500/20 font-mono">
+                          {engine.badge}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-gray-500">{engine.desc}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* DB Details (for PostgreSQL & MySQL) */}
+                {(dbType === 'postgres' || dbType === 'mysql') && (
+                  <div className="pl-2 space-y-2 text-xs pt-2 border-t border-border/50">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] text-gray-400 font-medium">
+                        Custom Database Name (opsional):
+                      </label>
+                      <span className="text-[10px] text-emerald-400 font-mono">
+                        {dbType === 'postgres' ? 'Auto: DATABASE_URL & DB_CONNECTION=pgsql' : 'Auto: MYSQL_URL, DB_HOST & DB_PASSWORD'}
+                      </span>
                     </div>
+                    <input
+                      type="text"
+                      placeholder={`db_${(name || 'app').toLowerCase().replace(/[^a-z0-9_]/g, '_')}`}
+                      value={customDbName}
+                      onChange={(e) => setCustomDbName(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-lg bg-background border border-border text-foreground font-mono text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                )}
+
+                {dbType === 'sqlite' && (
+                  <div className="text-[11px] text-gray-400 bg-background/50 p-2.5 rounded-lg border border-border">
+                    📁 Database SQLite akan otomatis disimpan di <code>/data/sqlite/{name || 'app'}.db</code> dan diinjeksikan sebagai <code>DATABASE_URL=sqlite:////data/sqlite/...</code>.
+                  </div>
+                )}
+
+                {dbType === 'none' && (
+                  <div className="text-[11px] text-gray-400 bg-background/50 p-2.5 rounded-lg border border-border">
+                    ⚡ Project stateless tanpa provisioning database. Container akan dijalankan murni dengan environment variables di bawah.
                   </div>
                 )}
               </div>
@@ -932,12 +1056,12 @@ export function DeployProjectModal({
                 </div>
 
                 <div className="p-3.5 rounded-xl border border-border bg-background space-y-1">
-                  <span className="text-gray-400 text-[11px] block">Environment & Database</span>
-                  <div className="font-semibold text-foreground">
-                    {compileEnvVars().length} Variabel .env Dikonfigurasi
+                  <span className="text-gray-400 text-[11px] block">Local DNS & Database</span>
+                  <div className="font-semibold text-foreground flex items-center gap-1.5">
+                    <span className="text-indigo-400 font-mono text-[11px]">http://{domain || `${name || 'app'}.homelab`}</span>
                   </div>
                   <div className="text-emerald-500 text-[11px]">
-                    {autoProvisionDb ? '✓ PostgreSQL Database Terhubung Otomatis' : 'Standalone Container'}
+                    {dbType !== 'none' ? `✓ Database ${dbType.toUpperCase()} Terhubung Otomatis` : 'Standalone Stateless Container'}
                   </div>
                 </div>
               </div>

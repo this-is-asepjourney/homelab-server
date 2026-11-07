@@ -38,6 +38,7 @@ print_banner() {
     echo "║       DEPLOYMENT TERPADU HOMELAB SERVER (UBUNTU fa)                ║"
     echo "║       Arsitektur Zero Duplication & 1 Central API Gateway          ║"
     echo "║       PAP Core API + PSM + IoT Fleet + Backup Engine               ║"
+    echo "║       Local DNS (CoreDNS :53) + Ingress Router (Nginx :80)         ║"
     echo "╚════════════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
 }
@@ -237,12 +238,15 @@ deploy_containers() {
     log_success "Sintaks docker-compose.yml valid."
 
     # Build container (pap-api memuat PAP Core, PSM, IoT Mapping, dan Backups)
+    log_info "Menyiapkan direktori Router, DNS, dan Backups..."
+    mkdir -p router/conf.d/projects dns /opt/homelab/backups backups
+
     log_info "Membangun Docker image (pap-api, psm-web, psm-agent, iot-web)..."
     docker compose build --parallel
 
     # Bersihkan kontainer lama (termasuk psm-api lama & iot_device_mapping_api zombie)
     log_info "Membersihkan kontainer lama (mematikan psm-api & iot_device_mapping_api zombie)..."
-    docker rm -f psm-api psm-web psm-agent pap-api iot_telegraf iot_device_mapping_api iot_dashboard_web 2>/dev/null || true
+    docker rm -f psm-api psm-web psm-agent pap-api iot_telegraf iot_device_mapping_api iot_dashboard_web homelab_router homelab_dns 2>/dev/null || true
     docker network rm iot-network 2>/dev/null || true
 
     # Jalankan container
@@ -263,6 +267,8 @@ verify_deployment() {
         "http://$HOST_IP:8000/|Homelab Mission Control Web UI (:8000)"
         "http://$HOST_IP:8000/api/health|IoT Fleet Telemetry (:8000)"
         "http://$HOST_IP:8000/api/v1/backups|Homelab Backup Engine (:8000)"
+        "http://$HOST_IP:8000/api/v1/dns/records|Local DNS & Virtual Hosts API (:8000)"
+        "http://127.0.0.1:80|Homelab Ingress Router (:80)"
         "http://127.0.0.1:3005|PSM Web Dashboard (:3005)"
         "http://127.0.0.1:8088|IoT Dashboard Web Hub (:8088)"
         "http://127.0.0.1:9273/metrics|IoT Telegraf Exporter (:9273)"
@@ -327,7 +333,17 @@ print_summary() {
     echo -e "${GREEN}${BOLD}          DEPLOYMENT HOMELAB SERVER SELESAI DENGAN SUKSES!         ${NC}"
     echo -e "${GREEN}${BOLD}════════════════════════════════════════════════════════════════════${NC}"
     echo ""
-    echo -e "Aplikasi dapat diakses melalui alamat berikut:"
+    echo -e "Akses via Local DNS & Virtual Host (Port 80):"
+    echo -e "  • ${BOLD}Homelab Mission Control${NC} : http://homelab (atau http://api.homelab)"
+    echo -e "  • ${BOLD}Personal Server Manager${NC} : http://psm.homelab"
+    echo -e "  • ${BOLD}IoT Dashboard Fleet${NC}     : http://iot.homelab"
+    echo -e "  • ${BOLD}Grafana Visualizations${NC}  : http://grafana.homelab"
+    echo -e "  • ${BOLD}Prometheus Metrics${NC}      : http://prometheus.homelab"
+    echo -e "  • ${BOLD}Uptime Kuma Hub${NC}         : http://kuma.homelab"
+    echo -e "  • ${BOLD}Vaultwarden Passwords${NC}   : http://vault.homelab"
+    echo -e "  • ${BOLD}Cockpit OS Console${NC}      : http://cockpit.homelab"
+    echo ""
+    echo -e "Aplikasi dapat diakses langsung melalui Port Server:"
     echo -e "  • ${BOLD}Homelab Mission Control Web UI${NC} : http://$HOST_IP:8000/ (atau http://$HOST_TAILSCALE:8000/)"
     echo -e "  • ${BOLD}PAP Core Central API Gateway${NC}   : http://$HOST_IP:8000/docs"
     echo -e "  • ${BOLD}Backup & Disaster Recovery${NC}     : http://$HOST_IP:8000/api/v1/backups"
@@ -338,6 +354,7 @@ print_summary() {
     echo ""
     echo -e "Perintah harian yang berguna:"
     echo -e "  Cek status kesehatan      : ${CYAN}python3 homelab.py status${NC}"
+    echo -e "  Cek daftar domain DNS     : ${CYAN}python3 homelab.py dns${NC}"
     echo -e "  Buat backup sistem        : ${CYAN}curl -X POST http://127.0.0.1:8000/api/v1/backups/create${NC}"
     echo -e "  Cek log realtime          : ${CYAN}docker compose logs -f${NC}"
     echo -e "  Restart gateway           : ${CYAN}docker compose restart pap-api${NC}"

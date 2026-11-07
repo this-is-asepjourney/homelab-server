@@ -203,6 +203,19 @@ export default function ProjectDetailPage() {
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
+          {/* Local DNS Ingress Link */}
+          <a
+            href={`http://${project?.domain || `${(project?.name || 'app').toLowerCase().replace(/[^a-z0-9_-]/g, '-')}.homelab`}`}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 text-xs font-semibold transition-colors shadow-sm"
+            title="Buka via Local DNS & Ingress Router (Port 80)"
+          >
+            <Globe className="w-3.5 h-3.5" />
+            <span>{project?.domain || `${(project?.name || 'app').toLowerCase().replace(/[^a-z0-9_-]/g, '-')}.homelab`}</span>
+            <ExternalLink className="w-3 h-3" />
+          </a>
+
           {/* External Access Link if container port is available */}
           {hostPortOnly && (
             <a
@@ -210,10 +223,9 @@ export default function ProjectDetailPage() {
               target="_blank"
               rel="noreferrer"
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 text-xs font-semibold transition-colors shadow-sm"
-              title="Buka aplikasi di tab baru"
+              title="Buka via Port Langsung Server"
             >
-              <Globe className="w-3.5 h-3.5" />
-              <span>Akses App</span>
+              <span>Port :{hostPortOnly}</span>
               <ExternalLink className="w-3 h-3" />
             </a>
           )}
@@ -241,7 +253,7 @@ export default function ProjectDetailPage() {
       <div className="flex items-center gap-2 border-b border-border text-sm overflow-x-auto pb-px">
         {[
           { key: 'deployments', label: `Deployments (${deployments.length})`, icon: Rocket },
-          { key: 'database', label: `PostgreSQL DB (${dbInfo?.db_name || 'Auto'})`, icon: Database },
+          { key: 'database', label: `Database (${(project?.db_type || 'Postgres').toUpperCase()})`, icon: Database },
           { key: 'environment', label: `Environment (${envVars.length})`, icon: Key },
           { key: 'overview', label: 'Source & Build', icon: FolderGit2 },
           { key: 'settings', label: 'Settings', icon: Settings },

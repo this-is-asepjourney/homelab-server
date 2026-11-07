@@ -70,6 +70,9 @@ def list_projects(
                 dockerfile_path=src.dockerfile_path if src else None,
                 compose_path=src.compose_path if src else None,
                 port_mappings=p.port_mappings or "3000:3000",
+                domain=p.domain,
+                db_type=p.db_type or "none",
+                db_name=p.db_name,
                 created_at=p.created_at
             )
         )
@@ -85,6 +88,11 @@ async def create_project(
     if not server:
         raise HTTPException(status_code=404, detail="Target server not found")
 
+    import re
+    clean_slug = re.sub(r"[^a-zA-Z0-9-]", "-", payload.name.lower().strip()).strip("-")
+    project_domain = payload.domain.strip().lower() if payload.domain else f"{clean_slug}.homelab"
+    project_db_type = getattr(payload, "db_type", "postgres") or "none"
+
     project = Project(
         server_id=payload.server_id,
         owner_id=current_user.id,
@@ -93,6 +101,9 @@ async def create_project(
         framework=payload.framework,
         source_type=payload.source_type,
         port_mappings=payload.port_mappings or "3000:3000",
+        domain=project_domain,
+        db_type=project_db_type,
+        db_name=getattr(payload, "database_name", None),
         status="active"
     )
     db.add(project)
@@ -133,6 +144,20 @@ async def create_project(
                 custom_db_name=getattr(payload, "database_name", None),
                 override_existing_env=True,
             )
+        except Exception:
+            pass
+
+    # Register Local DNS & Ingress Routing
+    if project.domain:
+        try:
+            from app.modules.dns.service import DnsService
+            hp = 3000
+            if project.port_mappings and ":" in project.port_mappings:
+                try:
+                    hp = int(project.port_mappings.split(":")[0].strip())
+                except Exception:
+                    hp = 3000
+            DnsService.register_domain_route(domain=project.domain, target_port=hp, project_name=project.name)
         except Exception:
             pass
 
@@ -235,6 +260,9 @@ async def create_project(
         dockerfile_path=source.dockerfile_path,
         compose_path=source.compose_path,
         port_mappings=project.port_mappings or "3000:3000",
+        domain=project.domain,
+        db_type=project.db_type or "none",
+        db_name=project.db_name,
         deployment_id=deployment_id,
         created_at=project.created_at
     )
@@ -264,6 +292,9 @@ def get_project(
         dockerfile_path=src.dockerfile_path if src else None,
         compose_path=src.compose_path if src else None,
         port_mappings=p.port_mappings or "3000:3000",
+        domain=p.domain,
+        db_type=p.db_type or "none",
+        db_name=p.db_name,
         created_at=p.created_at
     )
 
@@ -286,6 +317,12 @@ def update_project(
         p.framework = payload.framework
     if payload.port_mappings is not None:
         p.port_mappings = payload.port_mappings
+    if payload.domain is not None:
+        p.domain = payload.domain.strip().lower() if payload.domain else None
+    if payload.db_type is not None:
+        p.db_type = payload.db_type
+    if payload.db_name is not None:
+        p.db_name = payload.db_name
 
     src = p.source
     if src:
@@ -319,6 +356,14 @@ def delete_project(
     p = db.query(Project).filter(Project.id == project_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Project not found")
+
+    # Remove Local DNS & Ingress Routing
+    if p.domain:
+        try:
+            from app.modules.dns.service import DnsService
+            DnsService.remove_domain_route(p.domain)
+        except Exception:
+            pass
 
     db.delete(p)
     db.commit()

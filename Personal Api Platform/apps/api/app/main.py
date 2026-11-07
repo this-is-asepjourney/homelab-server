@@ -40,15 +40,21 @@ def init_db():
     try:
         from sqlalchemy import text
         with db_session.engine.connect() as conn:
-            try:
-                conn.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS port_mappings VARCHAR(255);"))
-                conn.commit()
-            except Exception:
+            for col, col_type in [
+                ("port_mappings", "VARCHAR(255)"),
+                ("domain", "VARCHAR(255)"),
+                ("db_type", "VARCHAR(50) DEFAULT 'none'"),
+                ("db_name", "VARCHAR(100)"),
+            ]:
                 try:
-                    conn.execute(text("ALTER TABLE projects ADD COLUMN port_mappings VARCHAR(255);"))
+                    conn.execute(text(f"ALTER TABLE projects ADD COLUMN IF NOT EXISTS {col} {col_type};"))
                     conn.commit()
                 except Exception:
-                    pass
+                    try:
+                        conn.execute(text(f"ALTER TABLE projects ADD COLUMN {col} {col_type};"))
+                        conn.commit()
+                    except Exception:
+                        pass
     except Exception:
         pass
     db = db_session.SessionLocal()

@@ -108,6 +108,7 @@
     <button class="nav-tab active" onclick="switchTab('tab-overview')">📊 Ringkasan Sistem</button>
     <button class="nav-tab" onclick="switchTab('tab-backups')">💾 Backup & Disaster Recovery</button>
     <button class="nav-tab" onclick="switchTab('tab-iot')">📟 IoT Heatpress Fleet</button>
+    <button class="nav-tab" onclick="switchTab('tab-dns')">🌐 Local DNS & Virtual Hosts</button>
     <button class="nav-tab" onclick="switchTab('tab-containers')">🐳 Layanan & Kontainer</button>
     <button class="nav-tab" onclick="switchTab('tab-api')">🔌 Gateway API Docs</button>
   </nav>
@@ -281,6 +282,94 @@
       </div>
     </div>
 
+
+    <!-- TAB: LOCAL DNS & VIRTUAL HOSTS -->
+    <div id="tab-dns" class="tab-content">
+      <div class="grid-4" style="margin-bottom: 1.25rem;">
+        <div class="card">
+          <div class="card-desc">DNS Server Lokal</div>
+          <div class="card-stat" style="color: #34d399;">:53</div>
+          <div class="card-desc" id="dns-status-badge">CoreDNS Active</div>
+        </div>
+        <div class="card">
+          <div class="card-desc">Ingress Gateway</div>
+          <div class="card-stat" style="color: #60a5fa;">:80</div>
+          <div class="card-desc">Virtual Host Nginx Router</div>
+        </div>
+        <div class="card">
+          <div class="card-desc">Domain Zone Utama</div>
+          <div class="card-stat" style="color: #a78bfa; font-size: 1.35rem;">*.homelab</div>
+          <div class="card-desc">dan *.fa.local</div>
+        </div>
+        <div class="card">
+          <div class="card-desc">Total Domain Terdaftar</div>
+          <div class="card-stat" id="stat-dns-count" style="color: #f59e0b;">0</div>
+          <div class="card-desc">Rute Virtual Host Aktif</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <div class="card-title">
+          <span>Daftar Domain Lokal Homelab (Tanpa Nomor Port)</span>
+          <div style="display: flex; gap: 0.5rem;">
+            <a href="/api/v1/dns/hosts-file" target="_blank" class="btn btn-sm" style="background: #334155; color: #fff;">📋 Unduh hosts.txt</a>
+            <button class="btn btn-primary btn-sm" onclick="openAddDomainModal()">➕ Tambah Rute Domain</button>
+          </div>
+        </div>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+          Setiap project di Homelab server dapat diakses langsung menggunakan domain ramah manusia melalui DNS Port 53 dan Ingress Port 80.
+        </p>
+
+        <div id="dns-alert" style="display: none; padding: 0.75rem; border-radius: 6px; margin-bottom: 1rem; font-size: 0.85rem;"></div>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Domain Lokal</th>
+                <th>Kategori</th>
+                <th>Target Kontainer / Port</th>
+                <th>Deskripsi</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="dns-table-body">
+              <tr>
+                <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 2rem;">Memuat daftar domain lokal...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- PANDUAN KONEKSI DNS KLIEN -->
+      <div class="card">
+        <div class="card-title">
+          <span>💡 Panduan Menggunakan Local DNS di Perangkat Klien</span>
+        </div>
+        <div class="grid-2" style="font-size: 0.85rem; line-height: 1.6; margin-top: 0.5rem;">
+          <div style="background: rgba(0,0,0,0.25); padding: 1rem; border-radius: 8px;">
+            <h4 style="color: #60a5fa; margin-bottom: 0.5rem;">Opsi A: Setting DNS di Router / Wi-Fi (Semua HP &amp; Laptop)</h4>
+            <ol style="padding-left: 1.25rem; color: var(--text-muted);">
+              <li>Buka pengaturan DHCP / DNS pada Router Wi-Fi Anda.</li>
+              <li>Ubah <b>Primary DNS Server</b> ke IP: <code>192.168.25.101</code>.</li>
+              <li>Isi <b>Secondary DNS Server</b> ke: <code>1.1.1.1</code>.</li>
+              <li>Selesai! Semua perangkat di rumah langsung bisa buka <code>http://*.homelab</code>.</li>
+            </ol>
+          </div>
+          <div style="background: rgba(0,0,0,0.25); padding: 1rem; border-radius: 8px;">
+            <h4 style="color: #34d399; margin-bottom: 0.5rem;">Opsi B: Menggunakan File Hosts (Tanpa Ubah Router)</h4>
+            <ol style="padding-left: 1.25rem; color: var(--text-muted);">
+              <li>Klik tombol <b>Unduh hosts.txt</b> di atas.</li>
+              <li>Windows: Salin isi file ke <code>C:\Windows\System32\drivers\etc\hosts</code></li>
+              <li>Linux / Mac: Tambahkan ke <code>/etc/hosts</code></li>
+              <li>Browser Anda langsung bisa membuka <code>http://psm.homelab</code> dll.</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- TAB 4: CONTAINERS -->
     <div id="tab-containers" class="tab-content">
       <div class="card">
@@ -445,6 +534,35 @@
     </div>
   </div>
 
+
+  <!-- MODAL: TAMBAH DOMAIN LOKAL -->
+  <div id="modal-add-domain" class="modal-backdrop">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div class="modal-title">🌐 Daftarkan Domain &amp; Virtual Host Baru</div>
+        <button class="modal-close" onclick="closeAddDomainModal()">&times;</button>
+      </div>
+      <form onsubmit="handleAddDomain(event)">
+        <div class="form-group">
+          <label class="form-label">Domain Lokal (Otomatis ditambahkan .homelab jika belum ada)</label>
+          <input type="text" id="domain-name" class="form-control" placeholder="contoh: pos-kasir.homelab" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Target Port Kontainer (Port Host)</label>
+          <input type="number" id="domain-port" class="form-control" placeholder="contoh: 3000" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Target Host (Default: host.docker.internal)</label>
+          <input type="text" id="domain-host" class="form-control" value="host.docker.internal">
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1.5rem;">
+          <button type="button" class="btn" style="background: #334155; color: #fff;" onclick="closeAddDomainModal()">Batal</button>
+          <button type="submit" id="btn-submit-domain" class="btn btn-primary">Simpan &amp; Terapkan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- MODAL: DETAIL MANIFEST -->
   <div id="modal-manifest" class="modal-backdrop">
     <div class="modal-box" style="max-width: 700px;">
@@ -471,10 +589,11 @@
       const target = document.getElementById(tabId);
       if (target) target.classList.add('active');
       const tabs = Array.from(document.querySelectorAll('.nav-tab'));
-      const activeIdx = ['tab-overview', 'tab-backups', 'tab-iot', 'tab-containers', 'tab-api'].indexOf(tabId);
+      const activeIdx = ['tab-overview', 'tab-backups', 'tab-iot', 'tab-dns', 'tab-containers', 'tab-api'].indexOf(tabId);
       if (activeIdx >= 0 && tabs[activeIdx]) tabs[activeIdx].classList.add('active');
 
       if (tabId === 'tab-backups') loadBackups();
+      if (tabId === 'tab-dns') loadDnsRecords();
     }
 
     async function loadBackups() {
@@ -621,6 +740,112 @@
     }
 
     // Initial load
+
+    async function loadDnsRecords() {
+      const tbody = document.getElementById('dns-table-body');
+      try {
+        const [resRecords, resStatus] = await Promise.all([
+          fetch('/api/v1/dns/records'),
+          fetch('/api/v1/dns/status').catch(() => null)
+        ]);
+        const json = await resRecords.json();
+        const data = json.data || [];
+
+        document.getElementById('stat-dns-count').innerText = data.length;
+
+        if (resStatus && resStatus.ok) {
+          const stJson = await resStatus.json();
+          const d = stJson.data || {};
+          const bEl = document.getElementById('dns-status-badge');
+          if (bEl) bEl.innerText = `${d.dns_server_port_53} (:53)`;
+        }
+
+        if (data.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 2rem;">Belum ada domain terdaftar.</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = data.map(d => {
+          const badgeClass = d.is_system ? 'badge-success' : 'badge-info';
+          return `
+            <tr>
+              <td>
+                <a href="${d.url}" target="_blank" style="color: #60a5fa; font-weight: 700; text-decoration: none; display: inline-flex; align-items: center; gap: 0.35rem;">
+                  🌐 ${d.domain} ↗
+                </a>
+              </td>
+              <td><span class="badge ${badgeClass}">${d.category}</span></td>
+              <td><code>${d.target}</code></td>
+              <td style="color: var(--text-muted);">${d.description}</td>
+              <td>
+                ${d.is_system ? '<span style="color: var(--text-muted); font-size: 0.75rem;">Sistem Utama</span>' : `
+                  <button onclick="deleteDomainRoute('${d.domain}')" class="btn btn-danger btn-sm" title="Hapus Rute">🗑️</button>
+                `}
+              </td>
+            </tr>
+          `;
+        }).join('');
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: #f87171; padding: 2rem;">Gagal memuat domain: ${err.message}</td></tr>`;
+      }
+    }
+
+    function openAddDomainModal() {
+      document.getElementById('modal-add-domain').classList.add('active');
+    }
+
+    function closeAddDomainModal() {
+      document.getElementById('modal-add-domain').classList.remove('active');
+    }
+
+    async function handleAddDomain(e) {
+      e.preventDefault();
+      const domain = document.getElementById('domain-name').value;
+      const target_port = parseInt(document.getElementById('domain-port').value, 10);
+      const target_host = document.getElementById('domain-host').value || 'host.docker.internal';
+      const btn = document.getElementById('btn-submit-domain');
+      const orig = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Menyimpan...';
+
+      try {
+        const res = await fetch('/api/v1/dns/records', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ domain, target_port, target_host })
+        });
+        const json = await res.json();
+        if (res.ok) {
+          closeAddDomainModal();
+          showNotification('success', json.message || 'Domain berhasil didaftarkan!');
+          loadDnsRecords();
+        } else {
+          showNotification('danger', json.detail || 'Gagal mendaftarkan domain');
+        }
+      } catch (err) {
+        showNotification('danger', 'Error: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+      }
+    }
+
+    async function deleteDomainRoute(domain) {
+      if (!confirm(`Hapus domain lokal ${domain}?`)) return;
+      try {
+        const res = await fetch(`/api/v1/dns/records/${encodeURIComponent(domain)}`, { method: 'DELETE' });
+        const json = await res.json();
+        if (res.ok) {
+          showNotification('success', json.message);
+          loadDnsRecords();
+        } else {
+          showNotification('danger', json.detail || 'Gagal menghapus');
+        }
+      } catch (err) {
+        showNotification('danger', 'Error: ' + err.message);
+      }
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
       loadBackups();
     });

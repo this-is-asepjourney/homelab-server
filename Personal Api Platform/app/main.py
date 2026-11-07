@@ -19,6 +19,7 @@ from app.modules.auth.router import router as auth_router
 from app.modules.backups.router import router as backups_router
 from app.modules.clients.router import router as clients_router
 from app.modules.database_registry.router import router as database_router
+from app.modules.dns.router import router as dns_router
 from app.modules.docker.router import router as docker_router
 from app.modules.integrations.router import router as integrations_router
 from app.modules.iot.fleet_router import compat_devices_router, v1_fleet_router
@@ -111,6 +112,7 @@ def create_app() -> FastAPI:
     api_v1.include_router(server_router)
     api_v1.include_router(auth_router)
     api_v1.include_router(backups_router)  # Unified Backup & Disaster Recovery
+    api_v1.include_router(dns_router)  # Local DNS & Virtual Host Manager
     api_v1.include_router(users_router)
     api_v1.include_router(permissions_router)
     api_v1.include_router(projects_router)

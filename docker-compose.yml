@@ -1,13 +1,10 @@
 # ╔══════════════════════════════════════════════════════════════════════════════╗
 # ║             MASTER HOMELAB SERVER — UNIFIED DOCKER COMPOSE                   ║
 # ║                                                                              ║
-# ║  KONSEP: "1 CENTRAL CORE API GATEWAY (PAP) & ZERO REDUNDANCY"                ║
-# ║  - PAP Core API Gateway (:8000) adalah API Pusat untuk semua project:        ║
-# ║    * Melayani Homelab Mission Control Web GUI (GET /)                        ║
-# ║    * Melayani Homelab Disaster Recovery & Backup Engine (/api/v1/backups)    ║
-# ║    * Melayani PSM Control Plane (Servers, Agents, Containers, Deployments)   ║
-# ║    * Melayani IoT Heatpress Fleet & Device Mapping (/api/devices/*)          ║
-# ║    * Melayani Core Platform, Project Integrations, dan Auth                  ║
+# ║  KONSEP: "1 CENTRAL CORE API GATEWAY, LOCAL DNS & ZERO REDUNDANCY"           ║
+# ║  - Local DNS Engine (:53) -> Resolves *.homelab & *.fa.local                 ║
+# ║  - Ingress Gateway Router (:80) -> Virtual Host Routing to All Projects      ║
+# ║  - PAP Core API Gateway (:8000) -> Master API Core & PSM Control Plane       ║
 # ║  - Menggunakan Grafana Utama yang sudah aktif       -> 192.168.25.101:3001   ║
 # ║  - Menggunakan Prometheus Docker yang sudah aktif   -> 192.168.25.101:9001   ║
 # ║  - Menggunakan Mosquitto MQTT yang sudah aktif      -> 192.168.25.101:1883   ║
@@ -18,8 +15,55 @@
 services:
 
   # ═════════════════════════════════════════════════════════════════
-  # 1. PERSONAL API PLATFORM (PAP — Unified Central API Gateway & Core)
-  # Mengintegrasikan PAP Core, PSM Control Plane, IoT Mapping, dan Backup Engine
+  # 1. LOCAL DNS SERVER (CoreDNS — Custom Local Domain Engine :53)
+  # Resolves *.homelab and *.fa.local to Homelab Server (LAN + Tailscale)
+  # ═════════════════════════════════════════════════════════════════
+  homelab-dns:
+    image: coredns/coredns:latest
+    container_name: homelab_dns
+    restart: unless-stopped
+    command: ["-conf", "/etc/coredns/Corefile"]
+    mem_limit: 64m
+    cpus: 0.15
+    ports:
+      - "${HOST_IP:-192.168.25.101}:53:53/udp"
+      - "${HOST_IP:-192.168.25.101}:53:53/tcp"
+      - "${HOST_TAILSCALE:-100.106.63.90}:53:53/udp"
+      - "${HOST_TAILSCALE:-100.106.63.90}:53:53/tcp"
+      - "5353:53/udp"
+    volumes:
+      - ./dns/Corefile:/etc/coredns/Corefile:ro
+      - ./dns/homelab.hosts:/etc/coredns/homelab.hosts:rw
+    networks:
+      - homelab-network
+
+  # ═════════════════════════════════════════════════════════════════
+  # 2. INGRESS GATEWAY ROUTER (Nginx Virtual Hosts :80)
+  # Menerima traffic HTTP port 80 dan meneruskan ke kontainer tujuan
+  # ═════════════════════════════════════════════════════════════════
+  homelab-router:
+    image: nginx:alpine
+    container_name: homelab_router
+    restart: unless-stopped
+    mem_limit: 96m
+    cpus: 0.25
+    ports:
+      - "80:80"
+    volumes:
+      - ./router/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./router/conf.d:/etc/nginx/conf.d:rw
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - homelab-network
+      - psm-network
+    depends_on:
+      pap-api:
+        condition: service_healthy
+
+  # ═════════════════════════════════════════════════════════════════
+  # 3. PERSONAL API PLATFORM (PAP — Unified Central API Gateway & Core)
+  # Mengintegrasikan PAP Core, PSM Control Plane, IoT Mapping, DNS, dan Backup Engine
   # ═════════════════════════════════════════════════════════════════
   pap-api:
     build:
@@ -57,6 +101,8 @@ services:
     volumes:
       - psm-storage:/opt/psm
       - homelab-backups:/app/backups
+      - ./dns/homelab.hosts:/app/dns/homelab.hosts:rw
+      - ./router/conf.d/projects:/app/router/conf.d/projects:rw
       - /var/run/docker.sock:/var/run/docker.sock:ro
     mem_limit: 384m
     cpus: 0.75
@@ -80,7 +126,7 @@ services:
           - psm-api
 
   # ═════════════════════════════════════════════════════════════════
-  # 2. PERSONAL SERVER MANAGER (PSM Frontend Web & Local Agent)
+  # 4. PERSONAL SERVER MANAGER (PSM Frontend Web & Local Agent)
   # Terhubung langsung ke pap-api (:8000) sebagai Central Core Gateway
   # ═════════════════════════════════════════════════════════════════
   psm-web:
@@ -124,6 +170,7 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-admin12345}
       - POSTGRES_HOST=${POSTGRES_HOST:-192.168.25.101}
       - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - HOMELAB_HOST_IP=${HOST_IP:-192.168.25.101}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -137,7 +184,7 @@ services:
       - psm-network
 
   # ═════════════════════════════════════════════════════════════════
-  # 3. IOT DASHBOARD (HEATPRESS FLEET MONITORING)
+  # 5. IOT DASHBOARD (HEATPRESS FLEET MONITORING)
   # Menggunakan PAP Core API Gateway (:8000) untuk Device Mapping & Telemetry
   # ═════════════════════════════════════════════════════════════════
   iot-telegraf:

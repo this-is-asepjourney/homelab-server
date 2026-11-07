@@ -52,8 +52,10 @@ def cmd_status(args):
     print("==================================================================")
 
     # 1. Host Infrastructure Services
-    print("\n[A] LAYANAN INFRASTRUKTUR EKSISTING (Host):")
+    print("\n[A] LAYANAN INFRASTRUKTUR & NETWORKING GATEWAY (Host):")
     services_infra = [
+        ("Ingress Gateway Router (Nginx)", 80, "http", f"http://{host}:80/"),
+        ("Local DNS Server (CoreDNS)", 53, "tcp"),
         ("Mosquitto MQTT Broker", 1883, "tcp"),
         ("PostgreSQL Server", 5432, "tcp"),
         ("MySQL Server (Stock)", 3306, "tcp"),
@@ -105,6 +107,32 @@ def cmd_status(args):
     print("  [OK] Tidak ada kontainer Mosquitto duplikat (Menggunakan Mosquitto port 1883)")
     print("  [OK] Tidak ada kontainer API redundan (PSM & IoT disatukan dalam pap-api port 8000)")
     print("==================================================================")
+
+
+def cmd_dns(args):
+    host = args.host
+    url = f"http://{host}:8000/api/v1/dns/records"
+    print("==================================================================")
+    print(f"       DAFTAR DOMAIN LOKAL & ROUTING HOMELAB ({host})")
+    print("==================================================================")
+    st, data = http_get(url)
+    if st != 200:
+        print(f"[ERROR] Gagal mengambil data DNS dari {url} (HTTP {st})")
+        return 1
+
+    records = data.get("records", [])
+    print(f"\nTotal Domain Terdaftar: {len(records)}\n")
+    print(f"{'DOMAIN':<25} {'TARGET PROXY':<25} {'KATEGORI':<15} {'DESKRIPSI'}")
+    print("-" * 85)
+    for r in records:
+        print(f"{r.get('domain'):<25} {r.get('target'):<25} {r.get('category'):<15} {r.get('description')}")
+
+    print("\n[PETUNJUK DNS KLIEN]")
+    print(f"  • DNS Server IP : {host} (Port 53)")
+    print(f"  • Ingress HTTP  : http://{host}:80")
+    print(f"  • Unduh hosts   : http://{host}:8000/api/v1/dns/hosts-file")
+    print("==================================================================")
+    return 0
 
 
 def cmd_backup(args):
@@ -195,10 +223,16 @@ def main():
     parser_grafana.add_argument("--password", default="adminpassword", help="Grafana password")
     parser_grafana.add_argument("--token", default="", help="Grafana API token")
 
+    # Command: dns
+    parser_dns = subparsers.add_parser("dns", help="Tampilkan daftar domain lokal & status DNS")
+    parser_dns.add_argument("--host", default=os.getenv("HOST_IP", "192.168.25.101"), help="IP Host Homelab")
+
     args = parser.parse_args()
 
     if args.command == "status":
         cmd_status(args)
+    elif args.command == "dns":
+        sys.exit(cmd_dns(args))
     elif args.command == "backup":
         sys.exit(cmd_backup(args))
     elif args.command == "import-grafana":

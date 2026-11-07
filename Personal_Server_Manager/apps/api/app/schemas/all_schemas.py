@@ -211,12 +211,15 @@ class ProjectCreate(BaseModel):
     compose_path: Optional[str] = "docker-compose.yml"
     auto_provision_db: bool = True
     database_name: Optional[str] = None
+    db_type: Optional[str] = "postgres"  # postgres, mysql, sqlite, none, custom
+    domain: Optional[str] = None  # e.g. pos-kasir.homelab
     port_mappings: Optional[str] = "3000:3000"
     environment_variables: Optional[List[EnvironmentVariableItem]] = None
     auto_deploy: bool = True
 
 class ProjectDatabaseProvisionRequest(BaseModel):
     db_name: Optional[str] = None
+    db_type: Optional[str] = "postgres"  # postgres, mysql, sqlite
     override_env: bool = True
 
 class ProjectUpdate(BaseModel):
@@ -228,6 +231,9 @@ class ProjectUpdate(BaseModel):
     dockerfile_path: Optional[str] = None
     compose_path: Optional[str] = None
     port_mappings: Optional[str] = None
+    domain: Optional[str] = None
+    db_type: Optional[str] = None
+    db_name: Optional[str] = None
 
 class ProjectResponse(BaseModel):
     id: str
@@ -244,6 +250,9 @@ class ProjectResponse(BaseModel):
     dockerfile_path: Optional[str] = None
     compose_path: Optional[str] = None
     port_mappings: Optional[str] = "3000:3000"
+    domain: Optional[str] = None
+    db_type: Optional[str] = "none"
+    db_name: Optional[str] = None
     deployment_id: Optional[str] = None
     created_at: datetime
 
@@ -255,6 +264,7 @@ class DeploymentCreateGit(BaseModel):
     branch: Optional[str] = None
     commit_hash: Optional[str] = None
     port_mappings: Optional[str] = None
+    domain: Optional[str] = None
     environment_variables: Optional[List[EnvironmentVariableItem]] = None
 
 class DeploymentCreateCompose(BaseModel):
