@@ -57,6 +57,13 @@
           <i class='bx bx-devices'></i>
           <span>Device Manager</span>
         </a>
+
+        <div class="nav-section-label">Akses & Keamanan NFC</div>
+        <a href="#" class="nav-item" id="nav-nfc" onclick="app.showPage('nfc'); return false;">
+          <i class='bx bx-id-card' style="color:#10b981;"></i>
+          <span>NFC Access & Roles</span>
+          <span class="sidebar-badge" id="badge-nfc-count" style="background:rgba(16,185,129,0.15);color:#10b981;font-size:10px;padding:2px 6px;border-radius:100px;font-weight:700;">--</span>
+        </a>
       </nav>
       <div class="sidebar-footer">
         <div class="system-status" id="pap-status" style="margin-bottom:8px;">
@@ -371,6 +378,142 @@
         </div>
       </div>
 
+      <!-- PAGE 4: NFC ACCESS & ROLE MANAGEMENT -->
+      <div id="page-nfc" class="page">
+        <div class="top-header">
+          <div class="header-title">
+            <h1><i class='bx bx-id-card' style="color:#10b981;"></i> Manajemen Kartu NFC & Setting Role Pengguna</h1>
+            <p>Setup identitas, role wewenang (Operator/Supervisor/Admin), dan pantau tap log real-time dari device Eternal ESP32</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-secondary" onclick="app.loadNfcData()">
+              <i class='bx bx-refresh'></i> Refresh Data
+            </button>
+            <button class="btn btn-primary" onclick="app.openNfcModal('add')">
+              <i class='bx bx-user-plus'></i> Daftarkan Pengguna NFC
+            </button>
+          </div>
+        </div>
+
+        <!-- Metric KPI Cards for NFC -->
+        <div class="kpi-grid">
+          <div class="kpi-card glass-panel">
+            <div class="kpi-icon" style="background:rgba(16,185,129,0.15);color:#10b981;">
+              <i class='bx bx-id-card'></i>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-label">Pengguna Terdaftar</span>
+              <span class="kpi-value" id="nfc-kpi-total">0</span>
+            </div>
+          </div>
+          <div class="kpi-card glass-panel">
+            <div class="kpi-icon" style="background:rgba(59,130,246,0.15);color:#3b82f6;">
+              <i class='bx bx-user-check'></i>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-label">Kartu Aktif</span>
+              <span class="kpi-value" id="nfc-kpi-active">0</span>
+            </div>
+          </div>
+          <div class="kpi-card glass-panel">
+            <div class="kpi-icon" style="background:rgba(245,158,11,0.15);color:#f59e0b;">
+              <i class='bx bx-scan'></i>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-label">Total Tap Tercatat</span>
+              <span class="kpi-value" id="nfc-kpi-taps">0</span>
+            </div>
+          </div>
+          <div class="kpi-card glass-panel">
+            <div class="kpi-icon" style="background:rgba(139,92,246,0.15);color:#8b5cf6;">
+              <i class='bx bx-time'></i>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-label">Tap Terakhir</span>
+              <span class="kpi-value" id="nfc-kpi-last-tap" style="font-size:15px;line-height:1.2;">-</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Scan Alert Banner -->
+        <div id="nfc-live-banner" class="glass-panel" style="display:none;margin-bottom:20px;padding:12px 20px;border-left:4px solid #10b981;align-items:center;justify-content:space-between;background:rgba(16,185,129,0.08);">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <i class='bx bx-radio-circle-marked bx-burst' style="font-size:24px;color:#10b981;"></i>
+            <div>
+              <strong id="nfc-banner-title">Kartu Baru Dideteksi!</strong>
+              <div id="nfc-banner-sub" style="font-size:12px;color:rgba(255,255,255,0.7);">UID: -</div>
+            </div>
+          </div>
+          <button class="btn btn-sm btn-primary" id="nfc-banner-btn" onclick="app.quickRegisterDetectedCard()">
+            <i class='bx bx-plus'></i> Daftarkan Kartu Ini
+          </button>
+        </div>
+
+        <!-- Table 1: Whitelist Pengguna & Role NFC -->
+        <div class="table-container glass-panel" style="margin-bottom:24px;">
+          <div class="table-header">
+            <div class="table-controls-left">
+              <h2 class="table-title"><i class='bx bx-user-check' style="color:#10b981;"></i> Whitelist & Setting Role Pengguna NFC</h2>
+            </div>
+            <div class="table-controls-right">
+              <input type="text" id="nfcUserSearch" placeholder="Cari nama, UID, atau role..." oninput="app.filterNfcUsers()" class="search-input" />
+            </div>
+          </div>
+          <div class="table-wrapper">
+            <table class="fleet-table">
+              <thead>
+                <tr>
+                  <th>No</th>
+                  <th>UID Kartu NFC</th>
+                  <th>Nama Pengguna</th>
+                  <th>Username</th>
+                  <th>Role / Wewenang</th>
+                  <th>Status</th>
+                  <th>Total Tap</th>
+                  <th>Terakhir Login / Tap</th>
+                  <th>Aksi Setting</th>
+                </tr>
+              </thead>
+              <tbody id="nfcUserTableBody">
+                <tr><td colspan="9" class="text-center"><div class="loader-container"><div class="loader"></div><p>Memuat daftar pengguna NFC...</p></div></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Table 2: Live Tap Event Audit Logs -->
+        <div class="table-container glass-panel">
+          <div class="table-header">
+            <div class="table-controls-left">
+              <h2 class="table-title"><i class='bx bx-history' style="color:#3b82f6;"></i> Riwayat Tap NFC Real-Time (Audit Log)</h2>
+            </div>
+            <div class="table-controls-right">
+              <button class="btn btn-sm btn-secondary" onclick="app.loadNfcLogs()">
+                <i class='bx bx-sync'></i> Update Log
+              </button>
+            </div>
+          </div>
+          <div class="table-wrapper">
+            <table class="fleet-table">
+              <thead>
+                <tr>
+                  <th>Waktu Tap</th>
+                  <th>UID Kartu</th>
+                  <th>Identitas Pengguna</th>
+                  <th>Role</th>
+                  <th>Aksi / Hasil</th>
+                  <th>Durasi Buka</th>
+                  <th>Device / IP</th>
+                </tr>
+              </thead>
+              <tbody id="nfcLogsTableBody">
+                <tr><td colspan="7" class="text-center"><p class="text-muted">Memuat riwayat tap...</p></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
     </main>
   </div>
 
@@ -486,6 +629,77 @@
           </button>
           <button type="submit" class="btn btn-primary" id="saveButton">
             <i class='bx bx-save'></i> Simpan Device
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Add/Edit NFC User & Role -->
+  <div class="modal-overlay" id="nfcModal" onclick="if(event.target===this) app.closeNfcModal()">
+    <div class="modal-content glass-modal">
+      <div class="modal-header">
+        <div class="modal-title-row">
+          <i class='bx bx-id-card modal-title-icon' style="color:#10b981;"></i>
+          <h2 id="nfcModalTitle">Daftarkan Pengguna NFC</h2>
+        </div>
+        <button class="btn-close" onclick="app.closeNfcModal()"><i class='bx bx-x'></i></button>
+      </div>
+      <form id="nfcUserForm" onsubmit="app.handleNfcFormSubmit(event)" novalidate>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>UID Kartu NFC <span class="required">*</span></label>
+            <div style="display:flex;gap:8px;">
+              <input type="text" id="nfcUid" placeholder="Contoh: E2801191" required style="font-family:monospace;text-transform:uppercase;flex:1;" />
+              <button type="button" class="btn btn-secondary btn-sm" onclick="app.fetchLatestTapForModal()" title="Ambil UID dari kartu yang baru saja di-tap di alat">
+                <i class='bx bx-barcode-reader'></i> Ambil Tap Terakhir
+              </button>
+            </div>
+            <small style="color:rgba(255,255,255,0.5);font-size:11px;display:block;margin-top:4px;">Tempel kartu ke alat ESP32, lalu klik "Ambil Tap Terakhir" untuk mengisi UID otomatis.</small>
+          </div>
+
+          <div class="form-row-2">
+            <div class="form-group">
+              <label>Nama Lengkap Pengguna <span class="required">*</span></label>
+              <input type="text" id="nfcNama" placeholder="Contoh: Budi Santoso" required />
+            </div>
+            <div class="form-group">
+              <label>Username <span class="required">*</span></label>
+              <input type="text" id="nfcUsername" placeholder="Contoh: budi_op1" required />
+            </div>
+          </div>
+
+          <div class="form-row-2">
+            <div class="form-group">
+              <label>Role / Wewenang Akses <span class="required">*</span></label>
+              <select id="nfcRole" required style="width:100%;padding:10px;background:rgba(30,41,59,0.8);border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:8px;">
+                <option value="Operator">Operator (Akses Produksi & Buka Kunci 2 Jam)</option>
+                <option value="Supervisor">Supervisor (Akses Kontrol & Monitoring)</option>
+                <option value="Administrator">Administrator (Superadmin / Hak Penuh)</option>
+                <option value="Maintenance">Maintenance / Teknisi Mesin</option>
+                <option value="Guest">Guest / Tamu (Izin Terbatas)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Status Akun</label>
+              <select id="nfcIsActive" style="width:100%;padding:10px;background:rgba(30,41,59,0.8);border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:8px;">
+                <option value="1">Aktif (Diberi Izin Buka Kunci)</option>
+                <option value="0">Nonaktif (Ditolak Masuk)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>PIN Tambahan (Opsional)</label>
+            <input type="password" id="nfcPin" placeholder="PIN numerik (misal 1234) jika diperlukan" />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="app.closeNfcModal()">
+            <i class='bx bx-x'></i> Batal
+          </button>
+          <button type="submit" class="btn btn-primary" id="btnSaveNfcUser">
+            <i class='bx bx-save'></i> Simpan Pengguna NFC
           </button>
         </div>
       </form>

@@ -218,7 +218,7 @@ def main():
     # Command: import-grafana
     parser_grafana = subparsers.add_parser("import-grafana", help="Impor dashboard Heatpress ke Grafana eksisting (:3001)")
     parser_grafana.add_argument("--host", default=os.getenv("HOST_IP", "192.168.25.101"), help="IP Host Homelab")
-    parser_grafana.add_argument("--grafana-port", type=int, default=3001, help="Port Grafana eksisting")
+    parser_grafana.add_argument("--grafana-port", "--port", dest="grafana_port", type=int, default=3001, help="Port Grafana eksisting")
     parser_grafana.add_argument("--user", default="admin", help="Grafana username")
     parser_grafana.add_argument("--password", default="adminpassword", help="Grafana password")
     parser_grafana.add_argument("--token", default="", help="Grafana API token")

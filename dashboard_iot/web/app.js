@@ -69,6 +69,8 @@ const app = {
             this.fetchAll(true);
             this.checkSystemHealth();
         }, REFRESH_INTERVAL_SEC * 1000);
+
+        this.startNfcLivePolling();
     },
 
     // ─── Page Navigation ─────────────────────────────────────────────────────
@@ -97,6 +99,11 @@ const app = {
                 if (pillAll) pillAll.classList.add('active');
             }
             this.applyFilters();
+        } else if (page === 'nfc') {
+            const navEl = document.getElementById('nav-nfc');
+            if (navEl) navEl.classList.add('active');
+            this.loadNfcData();
+            this.loadNfcLogs();
         }
     },
 
@@ -1301,6 +1308,343 @@ const app = {
             toast.classList.remove('show');
             setTimeout(() => toast.remove(), 300);
         }, 3500);
+    },
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // NFC ACCESS, ROLES & LIVE TAP SUITE (HEATPRESS HUB)
+    // ═══════════════════════════════════════════════════════════════════════════
+    nfcUsers: [],
+    lastDetectedTap: null,
+    nfcModalMode: 'add',
+    nfcPollInterval: null,
+
+    async loadNfcData() {
+        const tbody = document.getElementById('nfcUserTableBody');
+        if (tbody && this.nfcUsers.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="9" class="text-center"><div class="loader-container"><div class="loader"></div><p>Memuat whitelist pengguna NFC...</p></div></td></tr>`;
+        }
+
+        try {
+            const res = await fetch('/api/nfc/users');
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            this.nfcUsers = data.data || [];
+            this.renderNfcUsers(this.nfcUsers);
+            this.updateNfcKpis();
+        } catch (e) {
+            if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="text-center text-danger">Gagal memuat pengguna NFC: ${this._esc(e.message)}</td></tr>`;
+        }
+    },
+
+    updateNfcKpis() {
+        const totalEl = document.getElementById('nfc-kpi-total');
+        const activeEl = document.getElementById('nfc-kpi-active');
+        const tapsEl = document.getElementById('nfc-kpi-taps');
+        const badgeEl = document.getElementById('badge-nfc-count');
+
+        const total = this.nfcUsers.length;
+        const active = this.nfcUsers.filter(u => u.is_active == 1).length;
+        const totalTaps = this.nfcUsers.reduce((acc, u) => acc + (parseInt(u.total_taps, 10) || 0), 0);
+
+        if (totalEl) totalEl.innerText = total;
+        if (activeEl) activeEl.innerText = active;
+        if (tapsEl) tapsEl.innerText = totalTaps;
+        if (badgeEl) badgeEl.innerText = `${total} User`;
+    },
+
+    renderNfcUsers(users) {
+        const tbody = document.getElementById('nfcUserTableBody');
+        if (!tbody) return;
+
+        if (!users || users.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="9" class="text-center text-muted" style="padding:32px;"><i class='bx bx-id-card' style="font-size:32px;display:block;margin-bottom:8px;color:#94a3b8;"></i>Belum ada pengguna NFC terdaftar. Klik <b>"Daftarkan Pengguna NFC"</b> untuk menambahkan.</td></tr>`;
+            return;
+        }
+
+        const roleBadges = {
+            'Administrator': 'background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.3);',
+            'Superadmin': 'background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.3);',
+            'Supervisor': 'background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);',
+            'Operator': 'background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3);',
+            'Maintenance': 'background:rgba(14,165,233,0.15);color:#0284c7;border:1px solid rgba(14,165,233,0.3);',
+            'Guest': 'background:rgba(148,163,184,0.15);color:#94a3b8;border:1px solid rgba(148,163,184,0.3);'
+        };
+
+        tbody.innerHTML = users.map((u, i) => {
+            const roleStyle = roleBadges[u.role] || roleBadges['Operator'];
+            const statusClass = u.is_active == 1 ? 'online' : 'offline';
+            const statusText = u.is_active == 1 ? 'Aktif' : 'Nonaktif';
+            const lastLogin = u.last_login_at || u.created_at || '-';
+
+            return `
+            <tr>
+              <td>${i + 1}</td>
+              <td>
+                <span class="mcid-badge" style="font-family:monospace;font-weight:700;letter-spacing:1px;font-size:13px;">
+                  <i class='bx bx-credit-card-front' style="color:#10b981;"></i> ${this._esc(u.uid)}
+                </span>
+              </td>
+              <td><strong>${this._esc(u.nama)}</strong></td>
+              <td><code style="color:#cbd5e1;">@${this._esc(u.username)}</code></td>
+              <td>
+                <span style="display:inline-block;padding:3px 10px;border-radius:100px;font-size:11px;font-weight:700;${roleStyle}">
+                  ${this._esc(u.role)}
+                </span>
+              </td>
+              <td>
+                <span class="status-badge ${statusClass}" style="cursor:pointer;" onclick="app.toggleNfcStatus('${this._esc(u.uid)}', ${u.is_active})" title="Klik untuk ubah status">
+                  <span class="status-dot"></span>
+                  <span>${statusText}</span>
+                </span>
+              </td>
+              <td><strong>${u.total_taps || 0}</strong>x</td>
+              <td style="font-size:12px;color:rgba(255,255,255,0.7);">${this._esc(lastLogin)}</td>
+              <td>
+                <div style="display:flex;gap:6px;">
+                  <button class="btn btn-secondary btn-sm" onclick="app.openNfcModal('edit', '${this._esc(u.uid)}')" title="Edit Identitas & Role">
+                    <i class='bx bx-edit-alt'></i> Setting
+                  </button>
+                  <button class="btn btn-danger btn-sm" onclick="app.deleteNfcUser('${this._esc(u.uid)}')" title="Hapus Kartu">
+                    <i class='bx bx-trash'></i>
+                  </button>
+                </div>
+              </td>
+            </tr>
+            `;
+        }).join('');
+    },
+
+    filterNfcUsers() {
+        const query = (document.getElementById('nfcUserSearch')?.value || '').toLowerCase().trim();
+        if (!query) {
+            this.renderNfcUsers(this.nfcUsers);
+            return;
+        }
+        const filtered = this.nfcUsers.filter(u => 
+            (u.nama && u.nama.toLowerCase().includes(query)) ||
+            (u.uid && u.uid.toLowerCase().includes(query)) ||
+            (u.username && u.username.toLowerCase().includes(query)) ||
+            (u.role && u.role.toLowerCase().includes(query))
+        );
+        this.renderNfcUsers(filtered);
+    },
+
+    openNfcModal(mode = 'add', uid = null) {
+        this.nfcModalMode = mode;
+        const modal = document.getElementById('nfcModal');
+        const title = document.getElementById('nfcModalTitle');
+        const form = document.getElementById('nfcUserForm');
+        const uidInput = document.getElementById('nfcUid');
+        const namaInput = document.getElementById('nfcNama');
+        const usernameInput = document.getElementById('nfcUsername');
+        const roleSelect = document.getElementById('nfcRole');
+        const activeSelect = document.getElementById('nfcIsActive');
+        const pinInput = document.getElementById('nfcPin');
+
+        if (!modal) return;
+        form.reset();
+
+        if (mode === 'edit' && uid) {
+            const user = this.nfcUsers.find(u => u.uid.toUpperCase() === uid.toUpperCase());
+            if (user) {
+                if (title) title.innerText = `Edit Role & Identitas: ${user.nama}`;
+                uidInput.value = user.uid;
+                uidInput.readOnly = true;
+                namaInput.value = user.nama || '';
+                usernameInput.value = user.username || '';
+                roleSelect.value = user.role || 'Operator';
+                activeSelect.value = String(user.is_active);
+                pinInput.value = user.pin || '';
+            }
+        } else {
+            if (title) title.innerText = 'Daftarkan Pengguna NFC Baru';
+            uidInput.readOnly = false;
+            activeSelect.value = '1';
+            roleSelect.value = 'Operator';
+            if (this.lastDetectedTap) {
+                uidInput.value = this.lastDetectedTap.uid || '';
+            }
+        }
+
+        modal.classList.add('active');
+    },
+
+    closeNfcModal() {
+        const modal = document.getElementById('nfcModal');
+        if (modal) modal.classList.remove('active');
+    },
+
+    async fetchLatestTapForModal() {
+        try {
+            const res = await fetch('/api/nfc/latest-tap');
+            const data = await res.json();
+            if (data.data && data.data.uid) {
+                const uidInput = document.getElementById('nfcUid');
+                if (uidInput) uidInput.value = data.data.uid;
+                this.showToast(`UID kartu terakhir terisi: ${data.data.uid}`, 'success');
+            } else {
+                this.showToast('Belum ada kartu yang baru saja di-tap di alat.', 'warning');
+            }
+        } catch (e) {
+            this.showToast('Gagal mengambil UID tap terakhir', 'error');
+        }
+    },
+
+    async handleNfcFormSubmit(e) {
+        e.preventDefault();
+        const uid = document.getElementById('nfcUid').value.trim().toUpperCase();
+        const nama = document.getElementById('nfcNama').value.trim();
+        const username = document.getElementById('nfcUsername').value.trim();
+        const role = document.getElementById('nfcRole').value;
+        const is_active = parseInt(document.getElementById('nfcIsActive').value, 10);
+        const pin = document.getElementById('nfcPin').value.trim();
+
+        if (!uid || !nama || !username) {
+            this.showToast('Mohon lengkapi UID, Nama, dan Username!', 'warning');
+            return;
+        }
+
+        const btn = document.getElementById('btnSaveNfcUser');
+        if (btn) btn.disabled = true;
+
+        try {
+            const payload = { uid, nama, username, role, is_active, pin };
+            const method = this.nfcModalMode === 'edit' ? 'PUT' : 'POST';
+            const url = this.nfcModalMode === 'edit' ? `/api/nfc/users/${encodeURIComponent(uid)}` : '/api/nfc/users';
+
+            const res = await fetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || err.message || `HTTP ${res.status}`);
+            }
+
+            this.showToast(this.nfcModalMode === 'edit' ? 'Identitas & Role berhasil diperbarui!' : 'Pengguna NFC berhasil didaftarkan!', 'success');
+            this.closeNfcModal();
+            await this.loadNfcData();
+        } catch (err) {
+            this.showToast(`Error: ${err.message}`, 'error');
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    },
+
+    async deleteNfcUser(uid) {
+        if (!confirm(`Apakah Anda yakin ingin menghapus kartu NFC UID: ${uid} dari whitelist?`)) return;
+
+        try {
+            const res = await fetch(`/api/nfc/users/${encodeURIComponent(uid)}`, { method: 'DELETE' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            this.showToast(`Kartu NFC ${uid} berhasil dihapus!`, 'success');
+            await this.loadNfcData();
+        } catch (e) {
+            this.showToast(`Gagal menghapus: ${e.message}`, 'error');
+        }
+    },
+
+    async toggleNfcStatus(uid, currentStatus) {
+        const newStatus = currentStatus == 1 ? 0 : 1;
+        try {
+            const user = this.nfcUsers.find(u => u.uid.toUpperCase() === uid.toUpperCase());
+            const payload = { ...(user || {}), uid, is_active: newStatus };
+            const res = await fetch(`/api/nfc/users/${encodeURIComponent(uid)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            this.showToast(`Status kartu ${uid} diubah menjadi: ${newStatus == 1 ? 'AKTIF' : 'NONAKTIF'}`, 'success');
+            await this.loadNfcData();
+        } catch (e) {
+            this.showToast(`Gagal toggle status: ${e.message}`, 'error');
+        }
+    },
+
+    async loadNfcLogs() {
+        const tbody = document.getElementById('nfcLogsTableBody');
+        try {
+            const res = await fetch('/api/nfc/logs?limit=30');
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const logs = data.data || [];
+            this.renderNfcLogs(logs);
+
+            if (logs.length > 0) {
+                const latest = logs[0];
+                const lastTapEl = document.getElementById('nfc-kpi-last-tap');
+                if (lastTapEl) {
+                    lastTapEl.innerText = `${latest.nama} (${latest.created_at ? latest.created_at.substring(11) : ''})`;
+                }
+                this.checkUnregisteredCardBanner(latest);
+            }
+        } catch (e) {
+            if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">Belum ada riwayat tap atau log kosong.</td></tr>`;
+        }
+    },
+
+    renderNfcLogs(logs) {
+        const tbody = document.getElementById('nfcLogsTableBody');
+        if (!tbody) return;
+
+        if (!logs || logs.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">Belum ada riwayat tap recorded.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = logs.map(l => {
+            const isUnlock = (l.action_type || '').toUpperCase().includes('ON') || (l.action_type || '').toUpperCase().includes('UNLOCK');
+            const actionBadge = isUnlock 
+                ? `<span style="background:rgba(16,185,129,0.15);color:#10b981;font-weight:700;padding:2px 8px;border-radius:100px;font-size:11px;">🔓 Buka (2 Jam)</span>`
+                : `<span style="background:rgba(239,68,68,0.15);color:#ef4444;font-weight:700;padding:2px 8px;border-radius:100px;font-size:11px;">🔒 Kunci / Off</span>`;
+
+            return `
+            <tr>
+              <td style="font-size:12px;color:rgba(255,255,255,0.7);">${this._esc(l.created_at)}</td>
+              <td><span class="mcid-badge" style="font-family:monospace;font-size:12px;"><i class='bx bx-credit-card-front' style="color:#10b981;"></i> ${this._esc(l.uid)}</span></td>
+              <td><strong>${this._esc(l.nama)}</strong> <small style="color:#94a3b8;">(@${this._esc(l.username)})</small></td>
+              <td><span style="font-size:11px;font-weight:600;color:#93c5fd;">${this._esc(l.role)}</span></td>
+              <td>${actionBadge}</td>
+              <td style="font-size:12px;">${l.lock_duration_sec || 7200}s</td>
+              <td style="font-size:11px;color:#94a3b8;">${this._esc(l.device_serial || 'ETL-ESP32-001')} (${this._esc(l.device_ip || 'LAN')})</td>
+            </tr>
+            `;
+        }).join('');
+    },
+
+    checkUnregisteredCardBanner(latestTap) {
+        const banner = document.getElementById('nfc-live-banner');
+        if (!banner || !latestTap) return;
+
+        const isRegistered = this.nfcUsers.some(u => u.uid.toUpperCase() === latestTap.uid.toUpperCase());
+        if (!isRegistered) {
+            this.lastDetectedTap = latestTap;
+            const sub = document.getElementById('nfc-banner-sub');
+            if (sub) sub.innerText = `UID: ${latestTap.uid} baru saja di-tap di alat (${latestTap.device_serial || 'ESP32'}). Kartu ini belum memiliki nama & role.`;
+            banner.style.display = 'flex';
+        } else {
+            banner.style.display = 'none';
+        }
+    },
+
+    quickRegisterDetectedCard() {
+        if (this.lastDetectedTap) {
+            this.openNfcModal('add');
+            const uidInput = document.getElementById('nfcUid');
+            if (uidInput) uidInput.value = this.lastDetectedTap.uid;
+        }
+    },
+
+    startNfcLivePolling() {
+        if (this.nfcPollInterval) clearInterval(this.nfcPollInterval);
+        this.nfcPollInterval = setInterval(() => {
+            if (this.currentPage === 'nfc') {
+                this.loadNfcLogs();
+            }
+        }, 4000);
     },
 
     // ─── Escape HTML ──────────────────────────────────────────────────────────

@@ -696,3 +696,107 @@ def compat_get_device_status(mac_address: str, db: Session = Depends(get_db)):
 def compat_get_device_last_seen(mac_address: str, db: Session = Depends(get_db)):
     return FleetService(db).get_device_last_seen(mac_address)
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NFC IDENTITY, ROLES & LIVE TAP EVENT MANAGEMENT (HEATPRESS FLEET HUB)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@compat_devices_router.get("/api/nfc/users")
+def list_nfc_users():
+    """Retrieve all whitelisted NFC users, roles, and status from MySQL eternal_db."""
+    from app.modules.iot.nfc_service import NfcService
+    try:
+        users = NfcService.list_users()
+        return {"status": "success", "data": users, "total": len(users)}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "data": []}
+
+
+@compat_devices_router.post("/api/nfc/users")
+def create_nfc_user(payload: dict):
+    """Register or update an NFC user with name, username, and role."""
+    from app.modules.iot.nfc_service import NfcService
+    try:
+        saved = NfcService.save_user(payload)
+        return {"status": "success", "message": "Pengguna NFC berhasil disimpan!", "data": saved}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@compat_devices_router.put("/api/nfc/users/{uid}")
+def update_nfc_user(uid: str, payload: dict):
+    """Update role, identity, or active status for a specific NFC UID."""
+    from app.modules.iot.nfc_service import NfcService
+    try:
+        payload["uid"] = uid
+        saved = NfcService.save_user(payload)
+        return {"status": "success", "message": "Identitas & Role NFC berhasil diperbarui!", "data": saved}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@compat_devices_router.delete("/api/nfc/users/{uid}")
+def delete_nfc_user(uid: str):
+    """Revoke and delete an NFC card from whitelist."""
+    from app.modules.iot.nfc_service import NfcService
+    try:
+        ok = NfcService.delete_user(uid)
+        return {"status": "success", "message": "Kartu NFC berhasil dihapus dari sistem." if ok else "Kartu tidak ditemukan."}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@compat_devices_router.get("/api/nfc/logs")
+def list_nfc_logs(limit: int = Query(50, ge=1, le=200)):
+    """Fetch live audit log of NFC tap events."""
+    from app.modules.iot.nfc_service import NfcService
+    try:
+        logs = NfcService.list_access_logs(limit=limit)
+        return {"status": "success", "data": logs, "total": len(logs)}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "data": []}
+
+
+@compat_devices_router.get("/api/nfc/latest-tap")
+def get_latest_nfc_tap():
+    """Get the most recent card tap event (for Quick-Add Card in UI)."""
+    from app.modules.iot.nfc_service import NfcService
+    try:
+        tap = NfcService.get_latest_tap()
+        return {"status": "success", "data": tap}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "data": None}
+
+
+@compat_devices_router.post("/api/nfc/tap")
+@compat_devices_router.post("/api/nfc/access")
+@compat_devices_router.post("/nfc/access")
+def record_nfc_tap(payload: dict):
+    """Record an NFC tap event directly from hardware or simulated tap."""
+    from app.modules.iot.nfc_service import NfcService
+    try:
+        res = NfcService.record_tap_event(payload)
+        return {"status": "success", "data": res}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@compat_devices_router.post("/api/nfc/users/register")
+@compat_devices_router.post("/nfc/users/register")
+def register_nfc_user_from_device(payload: dict):
+    """Handle hardware user registration push."""
+    from app.modules.iot.nfc_service import NfcService
+    try:
+        saved = NfcService.save_user(payload)
+        return {"status": "success", "message": "User registered from device", "data": saved}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@compat_devices_router.post("/api/nfc/handshake")
+@compat_devices_router.post("/nfc/handshake")
+def nfc_hardware_handshake(payload: dict):
+    """Device online handshake confirmation."""
+    return {"status": "ok", "message": "NFC Hardware Handshake Accepted", "timestamp": "now"}
+
+
