@@ -158,6 +158,15 @@ def cmd_backup(args):
         return 1
 
 
+def test_grafana_auth(grafana_url: str, auth_header: str) -> bool:
+    try:
+        req = urllib.request.Request(f"{grafana_url}/api/org", headers={"Authorization": auth_header})
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
 def cmd_import_grafana(args):
     host = args.host
     port = args.grafana_port
@@ -166,9 +175,31 @@ def cmd_import_grafana(args):
     token = args.token
 
     grafana_url = f"http://{host}:{port}"
-    print(f"\n[*] Mengimpor 4 Dashboard Heatpress ke Grafana ({grafana_url})...")
+    print(f"\n[*] Mengimpor Dashboard Heatpress ke Grafana ({grafana_url})...")
 
-    auth_header = f"Bearer {token}" if token else f"Basic {base64.b64encode(f'{user}:{password}'.encode()).decode()}"
+    auth_header = None
+    if token:
+        auth_header = f"Bearer {token}"
+    else:
+        # Test provided credentials first, then try known homelab default passwords
+        candidates = [
+            (user, password),
+            ("admin", "admin12345"),
+            ("admin", "adminroot12345"),
+            ("admin", "adminpassword"),
+            ("admin", "admin"),
+            ("admin", "25022002"),
+        ]
+        for u, p in candidates:
+            cand_header = f"Basic {base64.b64encode(f'{u}:{p}'.encode()).decode()}"
+            if test_grafana_auth(grafana_url, cand_header):
+                auth_header = cand_header
+                print(f"[OK] Berhasil terautentikasi ke Grafana sebagai '{u}'!")
+                break
+
+        if not auth_header:
+            auth_header = f"Basic {base64.b64encode(f'{user}:{password}'.encode()).decode()}"
+            print("[WARN] Autentikasi Grafana belum tervalidasi. Akan dicoba dengan kredensial input.")
 
     dashboards_dir = Path(__file__).parent / "dashboard_iot" / "grafana" / "dashboards"
     if not dashboards_dir.exists():
@@ -194,6 +225,11 @@ def cmd_import_grafana(args):
                 res_json = json.loads(resp.read().decode())
                 print(f"  [OK] Dashboard '{content.get('title')}' berhasil diimpor -> {res_json.get('url')}")
                 success += 1
+        except urllib.error.HTTPError as e:
+            if e.code == 401:
+                print(f"  [FAIL] {jf.name}: 401 Unauthorized. Gunakan: python3 homelab.py import-grafana --user admin --password <password_grafana_anda>")
+            else:
+                print(f"  [FAIL] {jf.name}: {e}")
         except Exception as e:
             print(f"  [FAIL] {jf.name}: {e}")
 

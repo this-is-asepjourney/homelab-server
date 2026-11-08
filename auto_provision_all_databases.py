@@ -27,10 +27,26 @@ def provision_mysql():
     try:
         import pymysql
     except ImportError:
-        print("[!] pymysql not installed. Installing...")
+        print("[!] pymysql not installed on host Python.")
+        # Check if running in a container with pip, or try apt
         import subprocess
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "pymysql"])
-        import pymysql
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "pymysql"])
+            import pymysql
+        except Exception:
+            # Try apt-get if running as root or with sudo
+            print("[*] Attempting apt-get install python3-pymysql...")
+            try:
+                subprocess.check_call(["apt-get", "install", "-y", "python3-pymysql"])
+                import pymysql
+            except Exception:
+                # Try running inside docker container pap-api
+                print("[*] Attempting to run provisioning inside 'pap-api' container...")
+                cmd = "docker compose exec -T pap-api python - < " + os.path.abspath(__file__)
+                ret = subprocess.call(cmd, shell=True)
+                if ret == 0:
+                    sys.exit(0)
+                raise RuntimeError("Gagal mengimpor pymysql. Silakan install dengan: sudo apt install -y python3-pymysql python3-psycopg2")
 
     candidates = [
         ("root", root_pass),
@@ -229,11 +245,20 @@ def provision_postgres():
         import psycopg2
         from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
     except ImportError:
-        print("[!] psycopg2 not installed. Installing...")
+        print("[!] psycopg2 not installed on host Python.")
         import subprocess
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "psycopg2-binary"])
-        import psycopg2
-        from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "psycopg2-binary"])
+            import psycopg2
+            from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+        except Exception:
+            try:
+                subprocess.check_call(["apt-get", "install", "-y", "python3-psycopg2"])
+                import psycopg2
+                from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+            except Exception:
+                print("[WARN] psycopg2 tidak ditemukan, lewati provisioning PostgreSQL atau install dengan: sudo apt install -y python3-psycopg2")
+                return False
 
     conn = None
     for u, p in [(user, password), ("postgres", password), ("postgres", "admin12345"), ("postgres", "postgres")]:
