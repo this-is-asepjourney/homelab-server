@@ -107,6 +107,14 @@ def create_app() -> FastAPI:
     if HAS_PSM_DIRECT and psm_ws_router:
         application.include_router(psm_ws_router)
 
+    # ── PSM Control Plane Direct Integration ───────────────────────────────────
+    if HAS_PSM_DIRECT and psm_api_router:
+        # Mount PSM endpoints directly under /api/v1 (auth, servers, agents, containers, deployments, etc.)
+        # Mounted before api_v1 so PSM's user auth takes priority for /api/v1/auth
+        application.include_router(psm_api_router, prefix="/api/v1")
+        # Also alias under /psm/api/v1 and /psm for seamless proxy backward compatibility
+        application.include_router(psm_api_router, prefix="/psm/api/v1")
+
     # ── Versioned API v1 Router (/api/v1/...) ──────────────────────────────────
     api_v1 = APIRouter(prefix=settings.API_PREFIX)
     api_v1.include_router(server_router)
@@ -128,13 +136,6 @@ def create_app() -> FastAPI:
     api_v1.include_router(audit_router)
 
     application.include_router(api_v1)
-
-    # ── PSM Control Plane Direct Integration ───────────────────────────────────
-    if HAS_PSM_DIRECT and psm_api_router:
-        # Mount PSM endpoints directly under /api/v1 (servers, agents, containers, deployments, etc.)
-        application.include_router(psm_api_router, prefix="/api/v1")
-        # Also alias under /psm/api/v1 and /psm for seamless proxy backward compatibility
-        application.include_router(psm_api_router, prefix="/psm/api/v1")
 
     # ── Mission Control Web Management UI ──────────────────────────────────────
     @application.get("/", response_class=HTMLResponse, include_in_schema=False)
