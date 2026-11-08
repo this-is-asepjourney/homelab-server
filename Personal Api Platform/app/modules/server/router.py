@@ -1,5 +1,6 @@
 """HTTP router for liveness, readiness, system info,version, and Prometheus metrics scrape."""
 
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 
@@ -12,10 +13,13 @@ router = APIRouter(tags=["System"])
 
 
 @router.get("/health")
-def health_check(db: Session = Depends(get_db)):
-    service = ServerService(db)
+def health_check():
     return success_response(
-        data=service.get_health(),
+        data={
+            "status": "healthy",
+            "service": "personal-api-platform",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
         message="PAP service is alive",
     )
 

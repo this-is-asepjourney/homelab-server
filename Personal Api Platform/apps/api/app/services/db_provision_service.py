@@ -216,11 +216,11 @@ def build_postgres_env_vars(db_info: Dict[str, Any]) -> Dict[str, str]:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def find_working_mysql_connection() -> Optional[Dict[str, Any]]:
-    """Probe MySQL host and credentials."""
+    """Probe MySQL host and credentials with root & appuser candidates."""
     import pymysql
 
-    host = os.getenv("STOCK_DB_HOST", "192.168.25.101")
-    port = int(os.getenv("STOCK_DB_PORT", 3306))
+    host = os.getenv("MYSQL_HOST") or os.getenv("STOCK_DB_HOST", "192.168.25.101")
+    port = int(os.getenv("MYSQL_PORT") or os.getenv("STOCK_DB_PORT", 3306))
     candidates = [
         (host, port),
         ("192.168.25.101", 3306),
@@ -228,10 +228,12 @@ def find_working_mysql_connection() -> Optional[Dict[str, Any]]:
         ("127.0.0.1", 3306),
     ]
     creds = [
-        (os.getenv("STOCK_DB_USER", "pap_stock_reader"), os.getenv("STOCK_DB_PASSWORD", "admin12345")),
+        ("root", os.getenv("MYSQL_ROOT_PASSWORD", "adminroot12345")),
+        (os.getenv("MYSQL_USER", "appuser"), os.getenv("MYSQL_PASSWORD", "admin12345")),
+        ("root", "adminroot12345"),
         ("root", "admin12345"),
         ("root", "root"),
-        ("root", ""),
+        ("appuser", "admin12345"),
     ]
 
     for h, p in candidates:
@@ -251,20 +253,23 @@ def find_working_mysql_connection() -> Optional[Dict[str, Any]]:
     return None
 
 
-def ensure_mysql_database(db_name: str) -> Dict[str, Any]:
-    """Ensure a MySQL database exists, creating it if missing."""
+def ensure_mysql_database(db_name: str, target_user: Optional[str] = None) -> Dict[str, Any]:
+    """Ensure a project-specific MySQL database exists, creating it if missing and granting privileges to project user."""
     import pymysql
 
     clean_name = sanitize_db_name(db_name)
     conn_info = find_working_mysql_connection()
+    app_user = target_user or os.getenv("MYSQL_USER", "appuser")
+    app_pass = os.getenv("MYSQL_PASSWORD", "admin12345")
+
     if not conn_info:
         return {
             "db_type": "mysql",
             "db_name": clean_name,
-            "host": os.getenv("STOCK_DB_HOST", "192.168.25.101"),
+            "host": os.getenv("MYSQL_HOST") or os.getenv("STOCK_DB_HOST", "192.168.25.101"),
             "port": 3306,
-            "user": os.getenv("STOCK_DB_USER", "pap_stock_reader"),
-            "password": os.getenv("STOCK_DB_PASSWORD", "admin12345"),
+            "user": app_user,
+            "password": app_pass,
             "created": False,
             "error": "MySQL host unreachable",
         }
@@ -281,14 +286,18 @@ def ensure_mysql_database(db_name: str) -> Dict[str, Any]:
         exists = cur.fetchone() is not None
         created = False
         if not exists:
-            cur.execute(f"CREATE DATABASE `{clean_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;")
-            try:
-                cur.execute(f"GRANT ALL PRIVILEGES ON `{clean_name}`.* TO '{user}'@'%';")
-                cur.execute("FLUSH PRIVILEGES;")
-            except Exception:
-                pass
-            conn.commit()
+            cur.execute(f"CREATE DATABASE IF NOT EXISTS `{clean_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;")
             created = True
+
+        # Ensure dedicated project user (appuser) has full rights on this database
+        try:
+            cur.execute(f"CREATE USER IF NOT EXISTS '{app_user}'@'%' IDENTIFIED BY '{app_pass}';")
+            cur.execute(f"GRANT ALL PRIVILEGES ON `{clean_name}`.* TO '{app_user}'@'%';")
+            cur.execute("FLUSH PRIVILEGES;")
+        except Exception:
+            pass
+
+        conn.commit()
         cur.close()
         conn.close()
 
@@ -297,8 +306,8 @@ def ensure_mysql_database(db_name: str) -> Dict[str, Any]:
             "db_name": clean_name,
             "host": host,
             "port": port,
-            "user": user,
-            "password": password,
+            "user": app_user,
+            "password": app_pass,
             "created": created,
         }
     except Exception as e:
@@ -307,8 +316,8 @@ def ensure_mysql_database(db_name: str) -> Dict[str, Any]:
             "db_name": clean_name,
             "host": host,
             "port": port,
-            "user": user,
-            "password": password,
+            "user": app_user,
+            "password": app_pass,
             "created": False,
             "error": str(e),
         }
@@ -317,7 +326,28 @@ def ensure_mysql_database(db_name: str) -> Dict[str, Any]:
 def build_mysql_env_vars(db_info: Dict[str, Any]) -> Dict[str, str]:
     host = db_info.get("host") or "192.168.25.101"
     port = str(db_info.get("port") or 3306)
-    db_name = db_info.get("db_name") or "psm_app_db"
+    db_name = db_info.get("db_name") or "appdb"
+    user = db_info.get("user") or os.getenv("MYSQL_USER", "appuser")
+    password = db_info.get("password") or os.getenv("MYSQL_PASSWORD", "admin12345")
+    conn_url = f"mysql+pymysql://{user}:{password}@{host}:{port}/{db_name}"
+    standard_url = f"mysql://{user}:{password}@{host}:{port}/{db_name}"
+
+    return {
+        "DATABASE_URL": conn_url,
+        "MYSQL_URL": standard_url,
+        "SQLALCHEMY_DATABASE_URI": conn_url,
+        "MYSQL_HOST": host,
+        "MYSQL_PORT": port,
+        "MYSQL_DATABASE": db_name,
+        "MYSQL_USER": user,
+        "MYSQL_PASSWORD": password,
+        "DB_CONNECTION": "mysql",
+        "DB_HOST": host,
+        "DB_PORT": port,
+        "DB_DATABASE": db_name,
+        "DB_USERNAME": user,
+        "DB_PASSWORD": password,
+    }
     user = db_info.get("user") or "pap_stock_reader"
     password = db_info.get("password") or "admin12345"
     conn_url = f"mysql+pymysql://{user}:{password}@{host}:{port}/{db_name}"
@@ -373,14 +403,15 @@ def build_sqlite_env_vars(db_name: str) -> Tuple[Dict[str, Any], Dict[str, str]]
 # ══════════════════════════════════════════════════════════════════════════════
 
 def resolve_project_db_name(project: Project, env_map: Optional[Dict[str, str]] = None) -> str:
-    """Resolve database name from project record or environment."""
-    if project.db_name:
+    """Resolve database name specifically for this project (isolated per project, preventing shared appdb)."""
+    if project.db_name and project.db_name.strip().lower() != "appdb":
         return sanitize_db_name(project.db_name)
 
     if env_map:
         for k in ["POSTGRES_DB", "MYSQL_DATABASE", "DB_DATABASE", "DB_NAME"]:
-            if env_map.get(k):
-                return sanitize_db_name(env_map[k])
+            val = env_map.get(k)
+            if val and val.strip().lower() != "appdb":
+                return sanitize_db_name(val)
 
     return sanitize_db_name(project.name)
 

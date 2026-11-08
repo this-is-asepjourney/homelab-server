@@ -223,6 +223,9 @@ def main():
     parser_grafana.add_argument("--password", default="adminpassword", help="Grafana password")
     parser_grafana.add_argument("--token", default="", help="Grafana API token")
 
+    # Command: provision-db
+    parser_prov = subparsers.add_parser("provision-db", help="Auto-provision database mandiri untuk setiap project (eternal_db, stock_umkm, pap_core, psm)")
+
     # Command: dns
     parser_dns = subparsers.add_parser("dns", help="Tampilkan daftar domain lokal & status DNS")
     parser_dns.add_argument("--host", default=os.getenv("HOST_IP", "192.168.25.101"), help="IP Host Homelab")
@@ -231,6 +234,10 @@ def main():
 
     if args.command == "status":
         cmd_status(args)
+    elif args.command == "provision-db":
+        import auto_provision_all_databases
+        auto_provision_all_databases.provision_mysql()
+        auto_provision_all_databases.provision_postgres()
     elif args.command == "dns":
         sys.exit(cmd_dns(args))
     elif args.command == "backup":

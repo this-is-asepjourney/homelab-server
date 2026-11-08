@@ -168,6 +168,12 @@ setup_postgres_db() {
     else
         log_info "Client psql lokal tidak ditemukan; inisialisasi database akan ditangani otomatis oleh SQLAlchemy saat runtime."
     fi
+
+    # Inisialisasi otomatis semua database mandiri per project (MySQL 8.4: eternal_db, stock_umkm & PostgreSQL)
+    if command -v python3 &>/dev/null && [ -f "auto_provision_all_databases.py" ]; then
+        log_info "Menjalankan auto-provisioning database mandiri per project..."
+        python3 auto_provision_all_databases.py || true
+    fi
 }
 
 # ------------------------------------------------------------------------------

@@ -285,7 +285,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sysctrl_STS{MCID=\"ETL-ESP32-001\"} or vector(1)",
+          "expr": "sysctrl_STS{MCID=\"ETL-ESP32-001\"} or sysctrl_STS or vector(1)",
           "refId": "A"
         }
       ]
@@ -437,7 +437,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sysctrl_suhu{MCID=\"ETL-ESP32-001\"}",
+          "expr": "sysctrl_suhu{MCID=\"ETL-ESP32-001\"} or sysctrl_suhu or eternal_iot_suhu",
           "refId": "B"
         }
       ]
@@ -510,7 +510,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sysctrl_humidity{MCID=\"ETL-ESP32-001\"}",
+          "expr": "sysctrl_humidity{MCID=\"ETL-ESP32-001\"} or sysctrl_humidity or eternal_iot_humidity",
           "refId": "B"
         }
       ]
@@ -579,7 +579,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sysctrl_suhu{MCID=\"ETL-ESP32-001\"}",
+          "expr": "sysctrl_suhu{MCID=\"ETL-ESP32-001\"} or sysctrl_suhu or eternal_iot_suhu",
           "legendFormat": "MQTT Suhu (°C)",
           "refId": "B"
         },
@@ -588,7 +588,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sysctrl_humidity{MCID=\"ETL-ESP32-001\"}",
+          "expr": "sysctrl_humidity{MCID=\"ETL-ESP32-001\"} or sysctrl_humidity or eternal_iot_humidity",
           "legendFormat": "MQTT Humidity (%)",
           "refId": "C"
         }

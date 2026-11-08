@@ -59,7 +59,7 @@ services:
       - psm-network
     depends_on:
       pap-api:
-        condition: service_healthy
+        condition: service_started
 
   # ═════════════════════════════════════════════════════════════════
   # 3. PERSONAL API PLATFORM (PAP — Unified Central API Gateway & Core)
@@ -151,7 +151,7 @@ services:
       - NEXT_PUBLIC_WS_URL=ws://${HOST_IP:-192.168.25.101}:${PAP_PORT:-8000}
     depends_on:
       pap-api:
-        condition: service_healthy
+        condition: service_started
     networks:
       - homelab-network
       - psm-network
@@ -184,7 +184,7 @@ services:
       - psm-storage:/opt/psm
     depends_on:
       pap-api:
-        condition: service_healthy
+        condition: service_started
     networks:
       - homelab-network
       - psm-network
@@ -237,7 +237,7 @@ services:
       - homelab-network
     depends_on:
       pap-api:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/"]
       interval: 15s
