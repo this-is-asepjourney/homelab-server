@@ -85,9 +85,15 @@ services:
       - PAP_DATABASE_URL=${PAP_DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-admin12345}@${POSTGRES_HOST:-192.168.25.101}:${POSTGRES_PORT:-5432}/pap_core}
       - STOCK_DB_HOST=${STOCK_DB_HOST:-192.168.25.101}
       - STOCK_DB_PORT=${STOCK_DB_PORT:-3306}
-      - STOCK_DB_NAME=${STOCK_DB_NAME:-stock_umkm}
-      - STOCK_DB_USER=${STOCK_DB_USER:-pap_stock_reader}
+      - STOCK_DB_NAME=${STOCK_DB_NAME:-appdb}
+      - STOCK_DB_USER=${STOCK_DB_USER:-appuser}
       - STOCK_DB_PASSWORD=${STOCK_DB_PASSWORD:-admin12345}
+      - MYSQL_HOST=${MYSQL_HOST:-192.168.25.101}
+      - MYSQL_PORT=${MYSQL_PORT:-3306}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-adminroot12345}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-appdb}
+      - MYSQL_USER=${MYSQL_USER:-appuser}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-admin12345}
       - STORAGE_BASE_DIR=/opt/psm
       - UPLOAD_DIR=/opt/psm/uploads
       - RELEASE_DIR=/opt/psm/releases

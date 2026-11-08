@@ -45,12 +45,12 @@ class Settings(BaseSettings):
     PSM_DATABASE_USER: str = "appuser"
     PSM_DATABASE_PASSWORD: str = "REPLACE_ME"
 
-    # Existing Stock UMKM MySQL reference (least-privilege reader account)
-    STOCK_DB_HOST: str = "100.106.63.90"
+    # Existing MySQL reference (appdb / appuser)
+    STOCK_DB_HOST: str = "192.168.25.101"
     STOCK_DB_PORT: int = 3306
-    STOCK_DB_NAME: str = "stock_umkm"
-    STOCK_DB_USER: str = "pap_stock_reader"
-    STOCK_DB_PASSWORD: str = "REPLACE_ME"
+    STOCK_DB_NAME: str = "appdb"
+    STOCK_DB_USER: str = "appuser"
+    STOCK_DB_PASSWORD: str = "admin12345"
     STOCK_UMKM_API_URL: str = "http://192.168.25.101:8080/api"
     STOCK_UMKM_API_KEY: str = "REPLACE_ME"
 

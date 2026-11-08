@@ -8,16 +8,16 @@ datasources:
     url: http://prometheus:9090
     isDefault: true
 
-  - name: MySQL - iot_db
+  - name: MySQL - appdb
     uid: mysql-iot-db
     type: mysql
     access: proxy
     url: 192.168.25.101:3306
-    user: iot_esp32
-    database: iot_db
+    user: appuser
+    database: appdb
     isDefault: false
     jsonData:
-      database: iot_db
+      database: appdb
       maxOpenConns: 10
       maxIdleConns: 5
       connMaxLifetime: 14400
