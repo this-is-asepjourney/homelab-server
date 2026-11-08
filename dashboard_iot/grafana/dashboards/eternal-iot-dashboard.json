@@ -1,0 +1,723 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "Eternal IoT ESP32 Monitoring — MQTT (Telegraf/Prometheus) & MySQL (iot_db) — NFC Tap ON/OFF Lock 2 Jam & DHT11 Telemetry",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 100,
+      "title": "📡 Status Perangkat, Kunci NFC (Tap ON/OFF 2 Jam) & Jaringan (MQTT + MySQL iot_db)",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "mysql-iot-db"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "red",
+                  "text": "🔒 OFF (LOCKED)"
+                },
+                "1": {
+                  "color": "green",
+                  "text": "🔓 ON (UNLOCKED 2H)"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 0,
+        "y": 1
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "🔐 Status Kunci NFC (Tap ON/OFF)",
+      "type": "stat",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mysql",
+            "uid": "mysql-iot-db"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT CASE WHEN is_locked = 0 THEN 1 ELSE 0 END AS unlock_on FROM device_locks WHERE device_serial = 'ETL-ESP32-001' LIMIT 1;",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "mysql-iot-db"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 600
+              },
+              {
+                "color": "green",
+                "value": 1800
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 5,
+        "y": 1
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "title": "⏳ Sisa Timer Auto-Lock (Maks 2 Jam)",
+      "type": "stat",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mysql",
+            "uid": "mysql-iot-db"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT CASE WHEN is_locked = 0 AND unlock_expires_at > NOW() THEN TIMESTAMPDIFF(SECOND, NOW(), unlock_expires_at) ELSE 0 END AS remaining_sec FROM device_locks WHERE device_serial = 'ETL-ESP32-001' LIMIT 1;",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "mysql-iot-db"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 10,
+        "y": 1
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/^unlocked_by_name$/",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "title": "🪪 Pengguna NFC Terakhir",
+      "type": "stat",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mysql",
+            "uid": "mysql-iot-db"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COALESCE(CONCAT(unlocked_by_name, ' (', unlocked_by_uid, ')'), '-') AS unlocked_by_name FROM device_locks WHERE device_serial = 'ETL-ESP32-001' LIMIT 1;",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "red",
+                  "text": "OFFLINE"
+                },
+                "1": {
+                  "color": "green",
+                  "text": "ONLINE (MQTT)"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 15,
+        "y": 1
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "title": "📡 MQTT SysCtrl Status",
+      "type": "stat",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sysctrl_STS{MCID=\"ETL-ESP32-001\"} or vector(1)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "mysql-iot-db"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dBm",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": -75
+              },
+              {
+                "color": "green",
+                "value": -65
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 19,
+        "y": 1
+      },
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "title": "📶 Sinyal WiFi (RSSI)",
+      "type": "stat",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mysql",
+            "uid": "mysql-iot-db"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT wifi_rssi FROM iot_devices WHERE device_serial = 'ETL-ESP32-001' LIMIT 1;",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "id": 101,
+      "title": "🌡️ Sensor Suhu, Kelembapan & Heat Index Realtime (MQTT Prometheus & MySQL iot_db)",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "mysql-iot-db"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "max": 50,
+          "min": 0,
+          "unit": "celsius",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 20
+              },
+              {
+                "color": "yellow",
+                "value": 30
+              },
+              {
+                "color": "red",
+                "value": 36
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 0,
+        "y": 6
+      },
+      "id": 6,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "title": "🌡️ Suhu Udara (°C)",
+      "type": "gauge",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mysql",
+            "uid": "mysql-iot-db"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT temperature_c FROM iot_devices WHERE device_serial = 'ETL-ESP32-001' LIMIT 1;",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sysctrl_suhu{MCID=\"ETL-ESP32-001\"}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "mysql-iot-db"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "max": 100,
+          "min": 0,
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "orange",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 40
+              },
+              {
+                "color": "blue",
+                "value": 75
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 4,
+        "y": 6
+      },
+      "id": 7,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "title": "💧 Kelembapan (%)",
+      "type": "gauge",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mysql",
+            "uid": "mysql-iot-db"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT humidity_pct FROM iot_devices WHERE device_serial = 'ETL-ESP32-001' LIMIT 1;",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sysctrl_humidity{MCID=\"ETL-ESP32-001\"}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "mysql-iot-db"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 18,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "auto"
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 6
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "min",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "title": "📈 Grafik Riwayat Suhu (°C), Kelembapan (%) & Heat Index (MySQL iot_db + MQTT Prometheus)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mysql",
+            "uid": "mysql-iot-db"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT UNIX_TIMESTAMP(recorded_at) AS time_sec, temperature_c AS 'Suhu (°C)', humidity_pct AS 'Kelembapan (%)', heat_index_c AS 'Heat Index (°C)' FROM iot_telemetry_logs WHERE $__timeFilter(recorded_at) ORDER BY recorded_at ASC;",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sysctrl_suhu{MCID=\"ETL-ESP32-001\"}",
+          "legendFormat": "MQTT Suhu (°C)",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sysctrl_humidity{MCID=\"ETL-ESP32-001\"}",
+          "legendFormat": "MQTT Humidity (%)",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "id": 102,
+      "title": "🪪 Riwayat Tap Kartu NFC (ON/OFF Lock Toggle) & Daftar Pengguna NFC (MySQL iot_db)",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "mysql-iot-db"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 14,
+        "x": 0,
+        "y": 15
+      },
+      "id": 9,
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        }
+      },
+      "title": "📋 Log Akses Tap NFC (Buka Kunci ON 2 Jam / Kunci OFF)",
+      "type": "table",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mysql",
+            "uid": "mysql-iot-db"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT created_at AS 'Waktu Tap', uid AS 'UID NFC', nama AS 'Nama Pengguna', username AS 'Username', role AS 'Role', action_type AS 'Aksi (ON/OFF)', lock_duration_sec AS 'Durasi Kunci (s)', device_ip AS 'IP ESP32' FROM nfc_access_logs ORDER BY id DESC LIMIT 50;",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "mysql-iot-db"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 10,
+        "x": 14,
+        "y": 15
+      },
+      "id": 10,
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        }
+      },
+      "title": "👥 Daftar Pengguna Kartu NFC Terdaftar (nfc_users)",
+      "type": "table",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mysql",
+            "uid": "mysql-iot-db"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT uid AS 'UID NFC', nama AS 'Nama Lengkap', username AS 'Username', role AS 'Role', CASE WHEN is_active = 1 THEN 'AKTIF' ELSE 'NONAKTIF' END AS 'Status', total_taps AS 'Total Tap', last_tap_at AS 'Tap Terakhir' FROM nfc_users ORDER BY id ASC;",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "tags": [
+    "iot",
+    "eternal",
+    "esp32",
+    "homelab",
+    "nfc",
+    "mysql",
+    "mqtt"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "Asia/Jakarta",
+  "title": "Eternal IoT — ESP32 Smart Lock NFC & Sensor (Homelab)",
+  "uid": "eternal-iot-main",
+  "version": 1
+}
