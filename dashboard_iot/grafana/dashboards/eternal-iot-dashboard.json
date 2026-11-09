@@ -691,7 +691,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT uid AS 'UID NFC', nama AS 'Nama Lengkap', username AS 'Username', role AS 'Role', CASE WHEN is_active = 1 THEN 'AKTIF' ELSE 'NONAKTIF' END AS 'Status', total_taps AS 'Total Tap', last_tap_at AS 'Tap Terakhir' FROM nfc_users ORDER BY id ASC;",
+          "rawSql": "SELECT uid AS 'UID NFC', nama AS 'Nama Lengkap', username AS 'Username', role AS 'Role', CASE WHEN is_active = 1 THEN 'AKTIF' ELSE 'NONAKTIF' END AS 'Status', total_taps AS 'Total Tap', COALESCE(last_tap_at, last_login_at, '-') AS 'Tap Terakhir' FROM nfc_users ORDER BY id ASC;",
           "refId": "A"
         }
       ]

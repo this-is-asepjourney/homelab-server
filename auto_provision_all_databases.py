@@ -131,10 +131,28 @@ def provision_mysql():
         `total_taps` INT DEFAULT 0,
         `created_at` VARCHAR(64) DEFAULT NULL,
         `last_login_at` VARCHAR(64) DEFAULT NULL,
+        `last_tap_at` VARCHAR(64) DEFAULT NULL,
         INDEX `idx_nfc_users_username` (`username`),
         INDEX `idx_nfc_users_active` (`is_active`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """)
+
+    # Safe migrations if tables already existed
+    for col_sql in [
+        "ALTER TABLE `nfc_users` ADD COLUMN `last_tap_at` VARCHAR(64) DEFAULT NULL;",
+        "ALTER TABLE `nfc_users` ADD COLUMN `last_login_at` VARCHAR(64) DEFAULT NULL;",
+        "ALTER TABLE `device_locks` ADD COLUMN `unlocked_by_name` VARCHAR(100) DEFAULT NULL;",
+        "ALTER TABLE `device_locks` ADD COLUMN `unlocked_by_uid` VARCHAR(32) DEFAULT NULL;",
+        "ALTER TABLE `device_locks` ADD COLUMN `unlocked_by_username` VARCHAR(64) DEFAULT NULL;",
+        "ALTER TABLE `device_locks` ADD COLUMN `unlocked_by_role` VARCHAR(32) DEFAULT NULL;",
+        "ALTER TABLE `device_locks` ADD COLUMN `unlock_duration_sec` INT DEFAULT 7200;",
+        "ALTER TABLE `device_locks` ADD COLUMN `unlocked_at` VARCHAR(64) DEFAULT NULL;",
+        "ALTER TABLE `device_locks` ADD COLUMN `unlock_expires_at` DATETIME DEFAULT NULL;",
+    ]:
+        try:
+            cur.execute(col_sql)
+        except Exception:
+            pass
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS `iot_devices` (
@@ -201,22 +219,46 @@ def provision_mysql():
 
     # Initial seed data for eternal_db
     cur.execute("""
-    INSERT INTO `device_locks` (device_serial, device_name, is_locked, lock_status, unlock_duration_sec)
-    VALUES ('ETL-ESP32-001', 'Eternal', 1, 'LOCKED', 7200)
-    ON DUPLICATE KEY UPDATE device_name = VALUES(device_name);
+    INSERT INTO `device_locks` (device_serial, device_name, is_locked, lock_status, unlocked_by_uid, unlocked_by_name, unlocked_by_username, unlocked_by_role, unlock_duration_sec, unlocked_at, unlock_expires_at)
+    VALUES ('ETL-ESP32-001', 'Eternal', 0, 'UNLOCKED', 'E2801191', 'Administrator', 'admin', 'Superadmin', 7200, NOW(), NOW() + INTERVAL 2 HOUR)
+    ON DUPLICATE KEY UPDATE 
+        device_name = VALUES(device_name),
+        unlocked_by_name = COALESCE(unlocked_by_name, VALUES(unlocked_by_name)),
+        unlocked_by_uid = COALESCE(unlocked_by_uid, VALUES(unlocked_by_uid));
     """)
 
     cur.execute("""
-    INSERT INTO `iot_devices` (device_serial, device_name, model, temperature_c, humidity_pct, wifi_rssi, status)
-    VALUES ('ETL-ESP32-001', 'Eternal', 'Eternal-ESP32', 28.5, 65.0, -55, 'online')
-    ON DUPLICATE KEY UPDATE status = VALUES(status);
+    INSERT INTO `iot_devices` (device_serial, device_name, model, temperature_c, humidity_pct, heat_index_c, wifi_rssi, rssi, status, last_seen_at)
+    VALUES ('ETL-ESP32-001', 'Eternal', 'Eternal-ESP32', 28.5, 65.0, 29.8, -55, -55, 'online', NOW())
+    ON DUPLICATE KEY UPDATE 
+        status = VALUES(status),
+        temperature_c = CASE WHEN temperature_c = 0 THEN VALUES(temperature_c) ELSE temperature_c END,
+        humidity_pct = CASE WHEN humidity_pct = 0 THEN VALUES(humidity_pct) ELSE humidity_pct END,
+        wifi_rssi = CASE WHEN wifi_rssi = 0 THEN VALUES(wifi_rssi) ELSE wifi_rssi END;
     """)
 
     cur.execute("""
-    INSERT IGNORE INTO `nfc_users` (uid, nama, username, role, is_active, total_taps)
+    INSERT IGNORE INTO `nfc_users` (uid, nama, username, role, is_active, total_taps, created_at, last_login_at, last_tap_at)
     VALUES 
-      ('E2801191', 'Administrator', 'admin', 'Superadmin', 1, 1),
-      ('A1B2C3D4', 'Operator Utama', 'operator1', 'Operator', 1, 0);
+      ('E2801191', 'Administrator', 'admin', 'Superadmin', 1, 1, NOW(), NOW(), NOW()),
+      ('A1B2C3D4', 'Operator Utama', 'operator1', 'Operator', 1, 0, NOW(), NULL, NULL);
+    """)
+
+    cur.execute("""
+    INSERT INTO `nfc_access_logs` (uid, nama, username, role, action, action_type, lock_status, lock_duration_sec, remaining_sec, suhu, humidity, rssi, device_ip, device_serial)
+    SELECT 'E2801191', 'Administrator', 'admin', 'Superadmin', 'TAP_ON', 'TAP_ON', 'UNLOCKED', 7200, 7200, 28.5, 65.0, -55, '192.168.25.105', 'ETL-ESP32-001'
+    FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `nfc_access_logs` LIMIT 1);
+    """)
+
+    cur.execute("""
+    INSERT INTO `iot_telemetry_logs` (device_serial, temperature_c, humidity_pct, heat_index_c, wifi_rssi, recorded_at)
+    SELECT 'ETL-ESP32-001', 28.2, 66.0, 29.4, -58, NOW() - INTERVAL 15 MINUTE FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `iot_telemetry_logs` LIMIT 1)
+    UNION ALL
+    SELECT 'ETL-ESP32-001', 28.5, 65.0, 29.8, -56, NOW() - INTERVAL 10 MINUTE FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `iot_telemetry_logs` LIMIT 1)
+    UNION ALL
+    SELECT 'ETL-ESP32-001', 28.8, 64.5, 30.1, -55, NOW() - INTERVAL 5 MINUTE FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `iot_telemetry_logs` LIMIT 1)
+    UNION ALL
+    SELECT 'ETL-ESP32-001', 29.0, 64.0, 30.5, -55, NOW() FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `iot_telemetry_logs` LIMIT 1);
     """)
     print("[OK] Tables and seed data initialized in 'eternal_db'.")
 

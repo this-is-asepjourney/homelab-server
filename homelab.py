@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+ #!/usr/bin/env python3
 """
 homelab.py — CLI Manajemen Terpadu Homelab Server
 Mengelola dan memverifikasi seluruh komponen:
@@ -167,6 +167,118 @@ def test_grafana_auth(grafana_url: str, auth_header: str) -> bool:
         return False
 
 
+def ensure_grafana_datasources(grafana_url: str, auth_header: str, host: str):
+    """Memastikan Datasource Prometheus dan MySQL eternal_db terpasang di Grafana."""
+    print(f"\n[*] Memeriksa & Mengkonfigurasi Datasource di Grafana ({grafana_url})...")
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": auth_header,
+        "Accept": "application/json",
+    }
+
+    existing_ds = []
+    try:
+        req = urllib.request.Request(f"{grafana_url}/api/datasources", headers=headers)
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            existing_ds = json.loads(resp.read().decode())
+    except Exception as e:
+        print(f"  [WARN] Tidak dapat membaca daftar datasource: {e}")
+
+    # 1. Prometheus Datasource (uid: prometheus)
+    prom_ds = next((d for d in existing_ds if d.get("uid") == "prometheus" or d.get("type") == "prometheus"), None)
+    prom_payload = {
+        "name": "Prometheus",
+        "type": "prometheus",
+        "uid": "prometheus",
+        "access": "proxy",
+        "url": f"http://{host}:9001",
+        "isDefault": True,
+        "jsonData": {"httpMethod": "POST"}
+    }
+    if not prom_ds:
+        try:
+            req = urllib.request.Request(
+                f"{grafana_url}/api/datasources",
+                data=json.dumps(prom_payload).encode(),
+                headers=headers,
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                print("  [OK] Datasource Prometheus berhasil didaftarkan (uid: prometheus)")
+        except Exception as e:
+            print(f"  [WARN] Gagal membuat datasource Prometheus: {e}")
+    else:
+        print(f"  [OK] Datasource Prometheus ditemukan: '{prom_ds.get('name')}' (uid: {prom_ds.get('uid')})")
+
+    # 2. MySQL eternal_db Datasource (uid: mysql-iot-db)
+    mysql_ds = next(
+        (d for d in existing_ds if d.get("uid") == "mysql-iot-db" or "eternal_db" in d.get("name", "") or "iot_db" in d.get("name", "")),
+        None
+    )
+    mysql_payload = {
+        "name": "MySQL - eternal_db",
+        "type": "mysql",
+        "uid": "mysql-iot-db",
+        "access": "proxy",
+        "url": f"{host}:3306",
+        "user": "appuser",
+        "database": "eternal_db",
+        "basicAuth": False,
+        "isDefault": False,
+        "jsonData": {
+            "database": "eternal_db",
+            "maxOpenConns": 10,
+            "maxIdleConns": 5,
+            "connMaxLifetime": 14400,
+            "timezone": "Asia/Jakarta"
+        },
+        "secureJsonData": {
+            "password": "admin12345"
+        }
+    }
+
+    if mysql_ds:
+        ds_id = mysql_ds.get("id")
+        mysql_payload["id"] = ds_id
+        try:
+            req = urllib.request.Request(
+                f"{grafana_url}/api/datasources/{ds_id}",
+                data=json.dumps(mysql_payload).encode(),
+                headers=headers,
+                method="PUT"
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                print(f"  [OK] Datasource MySQL (id={ds_id}, uid=mysql-iot-db) berhasil diperbarui ke 'eternal_db'")
+        except Exception as e:
+            print(f"  [WARN] Gagal memperbarui datasource MySQL: {e}")
+    else:
+        try:
+            req = urllib.request.Request(
+                f"{grafana_url}/api/datasources",
+                data=json.dumps(mysql_payload).encode(),
+                headers=headers,
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                print("  [OK] Datasource MySQL (uid: mysql-iot-db) berhasil didaftarkan ke 'eternal_db'!")
+        except Exception as e:
+            print(f"  [WARN] Gagal membuat datasource MySQL: {e}")
+
+    # 3. Test MySQL datasource connection
+    try:
+        req = urllib.request.Request(f"{grafana_url}/api/datasources/uid/mysql-iot-db/health", headers=headers)
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            health = json.loads(resp.read().decode())
+            status = health.get("status", "UNKNOWN")
+            msg = health.get("message", "")
+            if status == "OK":
+                print(f"  [OK] Verifikasi Koneksi MySQL: SEHAT ({msg or 'Database Connection OK'})\n")
+            else:
+                print(f"  [WARN] Verifikasi Koneksi MySQL: {status} - {msg}\n")
+    except Exception:
+        pass
+
+
 def cmd_import_grafana(args):
     host = args.host
     port = args.grafana_port
@@ -175,7 +287,7 @@ def cmd_import_grafana(args):
     token = args.token
 
     grafana_url = f"http://{host}:{port}"
-    print(f"\n[*] Mengimpor Dashboard Heatpress ke Grafana ({grafana_url})...")
+    print(f"\n[*] Menghubungi Grafana Homelab ({grafana_url})...")
 
     auth_header = None
     if token:
@@ -200,6 +312,9 @@ def cmd_import_grafana(args):
         if not auth_header:
             auth_header = f"Basic {base64.b64encode(f'{user}:{password}'.encode()).decode()}"
             print("[WARN] Autentikasi Grafana belum tervalidasi. Akan dicoba dengan kredensial input.")
+
+    # Otomatis pastikan datasource Prometheus & MySQL terpasang sebelum impor dashboard
+    ensure_grafana_datasources(grafana_url, auth_header, host)
 
     dashboards_dir = Path(__file__).parent / "dashboard_iot" / "grafana" / "dashboards"
     if not dashboards_dir.exists():
