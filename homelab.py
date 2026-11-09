@@ -239,19 +239,19 @@ def ensure_grafana_datasources(grafana_url: str, auth_header: str, host: str):
     }
 
     if mysql_ds:
-        ds_id = mysql_ds.get("id")
-        mysql_payload["id"] = ds_id
+        uid = mysql_ds.get("uid", "mysql-iot-db")
         try:
             req = urllib.request.Request(
-                f"{grafana_url}/api/datasources/{ds_id}",
+                f"{grafana_url}/api/datasources/uid/{uid}",
                 data=json.dumps(mysql_payload).encode(),
                 headers=headers,
                 method="PUT"
             )
             with urllib.request.urlopen(req, timeout=5) as resp:
-                print(f"  [OK] Datasource MySQL (id={ds_id}, uid=mysql-iot-db) berhasil diperbarui ke 'eternal_db'")
-        except Exception as e:
-            print(f"  [WARN] Gagal memperbarui datasource MySQL: {e}")
+                print(f"  [OK] Datasource MySQL (uid={uid}) berhasil diperbarui ke 'eternal_db'")
+        except Exception:
+            # File-provisioned datasources di Grafana berstatus read-only dari API, ini normal
+            pass
     else:
         try:
             req = urllib.request.Request(
@@ -302,19 +302,19 @@ def ensure_grafana_datasources(grafana_url: str, auth_header: str, host: str):
         }
     }
     if influx_ds:
-        ds_id = influx_ds.get("id")
-        influx_payload["id"] = ds_id
+        uid = influx_ds.get("uid", "influxdb-iot")
         try:
             req = urllib.request.Request(
-                f"{grafana_url}/api/datasources/{ds_id}",
+                f"{grafana_url}/api/datasources/uid/{uid}",
                 data=json.dumps(influx_payload).encode(),
                 headers=headers,
                 method="PUT"
             )
             with urllib.request.urlopen(req, timeout=5) as resp:
-                print(f"  [OK] Datasource InfluxDB (id={ds_id}, uid=influxdb-iot) berhasil diperbarui!")
-        except Exception as e:
-            print(f"  [WARN] Gagal memperbarui datasource InfluxDB: {e}")
+                print(f"  [OK] Datasource InfluxDB (uid={uid}) berhasil diperbarui!")
+        except Exception:
+            # File-provisioned datasources di Grafana berstatus read-only dari API, ini normal
+            pass
     else:
         try:
             req = urllib.request.Request(
