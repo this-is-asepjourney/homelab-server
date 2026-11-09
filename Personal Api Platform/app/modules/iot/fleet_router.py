@@ -712,6 +712,21 @@ def list_nfc_users():
         return {"status": "error", "message": str(e), "data": []}
 
 
+@compat_devices_router.get("/api/nfc/users/{uid}")
+def get_nfc_user_by_uid(uid: str):
+    """Retrieve single NFC user profile by UID (for live ESP32 query)."""
+    from app.modules.iot.nfc_service import NfcService
+    try:
+        user = NfcService.get_user_by_uid(uid)
+        if not user:
+            raise HTTPException(status_code=404, detail="Kartu tidak terdaftar")
+        return {"status": "success", "data": user}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"status": "error", "message": str(e), "data": None}
+
+
 @compat_devices_router.post("/api/nfc/users")
 def create_nfc_user(payload: dict):
     """Register or update an NFC user with name, username, and role."""

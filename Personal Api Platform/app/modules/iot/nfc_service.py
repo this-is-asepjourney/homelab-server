@@ -190,9 +190,39 @@ class NfcService:
                         is_active = VALUES(is_active),
                         device_serial = VALUES(device_serial);
                 """, (raw_uid, nama, username, role, pin, is_active, device_serial, now_str))
-            return NfcService.get_user_by_uid(raw_uid) or {"uid": raw_uid, "status": "saved"}
+            saved_user = NfcService.get_user_by_uid(raw_uid) or {"uid": raw_uid, "status": "saved"}
+
+            # Auto-push ke ESP32 hardware (192.168.25.104) agar langsung aktif tanpa restart alat
+            NfcService.push_to_device(saved_user)
+            return saved_user
         finally:
             conn.close()
+
+    @staticmethod
+    def push_to_device(user: Dict[str, Any]):
+        """Kirim profil user NFC langsung ke memori RAM/NVS ESP32 agar langsung GRANTED."""
+        import json
+        import urllib.request
+        target_ips = ["192.168.25.104"]
+        for ip in target_ips:
+            try:
+                payload = json.dumps({
+                    "uid": user.get("uid"),
+                    "nama": user.get("nama"),
+                    "username": user.get("username"),
+                    "role": user.get("role", "Operator"),
+                    "pin": user.get("pin", "")
+                }).encode("utf-8")
+                req = urllib.request.Request(
+                    f"http://{ip}/api/nfc/register_user",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=1.5):
+                    pass
+            except Exception:
+                pass
 
     @staticmethod
     def delete_user(uid: str) -> bool:
@@ -202,7 +232,24 @@ class NfcService:
             _ensure_tables(conn)
             with conn.cursor() as cur:
                 affected = cur.execute("DELETE FROM nfc_users WHERE UPPER(uid) = %s;", (clean_uid,))
-                return affected > 0
+            
+            # Hapus juga dari hardware ESP32
+            import json
+            import urllib.request
+            try:
+                payload = json.dumps({"uid": clean_uid}).encode("utf-8")
+                req = urllib.request.Request(
+                    "http://192.168.25.104/api/rfid/delete",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=1.5):
+                    pass
+            except Exception:
+                pass
+
+            return affected > 0
         finally:
             conn.close()
 
