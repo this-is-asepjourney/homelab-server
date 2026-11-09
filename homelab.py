@@ -380,6 +380,13 @@ def cmd_import_grafana(args):
     # Otomatis pastikan datasource Prometheus & MySQL terpasang sebelum impor dashboard
     ensure_grafana_datasources(grafana_url, auth_header, host)
 
+    # Pastikan bucket InfluxDB memiliki titik telemetri awal agar grafik Grafana langsung tampil
+    try:
+        import auto_provision_all_databases
+        auto_provision_all_databases.provision_influxdb()
+    except Exception:
+        pass
+
     dashboards_dir = Path(__file__).parent / "dashboard_iot" / "grafana" / "dashboards"
     if not dashboards_dir.exists():
         print(f"[ERROR] Folder dashboards '{dashboards_dir}' tidak ditemukan!")

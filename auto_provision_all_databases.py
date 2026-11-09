@@ -252,13 +252,12 @@ def provision_mysql():
 
     cur.execute("""
     INSERT INTO `iot_telemetry_logs` (device_serial, temperature_c, humidity_pct, heat_index_c, wifi_rssi, recorded_at)
-    SELECT 'ETL-ESP32-001', 28.2, 66.0, 29.4, -58, NOW() - INTERVAL 15 MINUTE FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `iot_telemetry_logs` LIMIT 1)
-    UNION ALL
-    SELECT 'ETL-ESP32-001', 28.5, 65.0, 29.8, -56, NOW() - INTERVAL 10 MINUTE FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `iot_telemetry_logs` LIMIT 1)
-    UNION ALL
-    SELECT 'ETL-ESP32-001', 28.8, 64.5, 30.1, -55, NOW() - INTERVAL 5 MINUTE FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `iot_telemetry_logs` LIMIT 1)
-    UNION ALL
-    SELECT 'ETL-ESP32-001', 29.0, 64.0, 30.5, -55, NOW() FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `iot_telemetry_logs` LIMIT 1);
+    VALUES 
+        ('ETL-ESP32-001', 28.1, 66.5, 29.2, -58, NOW() - INTERVAL 30 MINUTE),
+        ('ETL-ESP32-001', 28.3, 66.0, 29.5, -57, NOW() - INTERVAL 20 MINUTE),
+        ('ETL-ESP32-001', 28.5, 65.2, 29.8, -56, NOW() - INTERVAL 10 MINUTE),
+        ('ETL-ESP32-001', 28.7, 64.8, 30.0, -55, NOW() - INTERVAL 5 MINUTE),
+        ('ETL-ESP32-001', 28.5, 65.0, 29.8, -55, NOW());
     """)
     print("[OK] Tables and seed data initialized in 'eternal_db'.")
 
@@ -329,8 +328,49 @@ def provision_postgres():
     conn.close()
     return True
 
+def provision_influxdb():
+    print("\n" + "=" * 65)
+    print("  [InfluxDB v2] Provisioning Initial Telemetry & Time-Series Data")
+    print("=" * 65)
+
+    host = os.getenv("INFLUXDB_HOST", "192.168.25.101")
+    port = int(os.getenv("INFLUXDB_PORT", 8086))
+    token = os.getenv("INFLUXDB_TOKEN", "homelab-influxdb-master-auth-token-2026")
+    org = os.getenv("INFLUXDB_ORG", "homelab")
+    bucket = os.getenv("INFLUXDB_BUCKET", "eternal_telemetry")
+
+    import urllib.request
+    import urllib.parse
+    import time
+
+    now_sec = int(time.time())
+    points = [
+        f"iot_telemetry,device=Eternal,serial=ETL-ESP32-001,model=Eternal-ESP32,lock_status=LOCKED temperature=28.1,humidity=66.5,heat_index=29.2,rssi=-58i,is_locked=1i,remaining_sec=0i {now_sec - 1800}",
+        f"iot_telemetry,device=Eternal,serial=ETL-ESP32-001,model=Eternal-ESP32,lock_status=LOCKED temperature=28.3,humidity=66.0,heat_index=29.5,rssi=-57i,is_locked=1i,remaining_sec=0i {now_sec - 1200}",
+        f"iot_telemetry,device=Eternal,serial=ETL-ESP32-001,model=Eternal-ESP32,lock_status=LOCKED temperature=28.5,humidity=65.2,heat_index=29.8,rssi=-56i,is_locked=1i,remaining_sec=0i {now_sec - 600}",
+        f"iot_telemetry,device=Eternal,serial=ETL-ESP32-001,model=Eternal-ESP32,lock_status=LOCKED temperature=28.5,humidity=65.0,heat_index=29.8,rssi=-55i,is_locked=1i,remaining_sec=0i {now_sec}",
+    ]
+    payload = "\n".join(points).encode("utf-8")
+    params = urllib.parse.urlencode({"org": org, "bucket": bucket, "precision": "s"})
+    write_url = f"http://{host}:{port}/api/v2/write?{params}"
+
+    headers = {
+        "Authorization": f"Token {token}",
+        "Content-Type": "text/plain; charset=utf-8"
+    }
+    try:
+        req = urllib.request.Request(write_url, data=payload, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            if resp.status in (200, 204):
+                print(f"[OK] InfluxDB bucket '{bucket}' seeded with initial telemetries (HTTP {resp.status})!")
+                return True
+    except Exception as e:
+        print(f"[INFO] InfluxDB provision note: {e}")
+        return False
+
 if __name__ == "__main__":
     provision_mysql()
     provision_postgres()
+    provision_influxdb()
     print("\n[SUCCESS] All isolated project databases have been provisioned successfully!")
 

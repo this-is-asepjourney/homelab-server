@@ -18,13 +18,13 @@
         "y": 0
       },
       "id": 100,
-      "title": "📡 Status Perangkat, Kunci NFC (Tap ON/OFF 2 Jam) & Jaringan (MQTT + MySQL iot_db)",
+      "title": "📡 Status Perangkat & Kunci NFC — Pipeline: MQTT → API Gateway → InfluxDB & MySQL",
       "type": "row"
     },
     {
       "datasource": {
-        "type": "mysql",
-        "uid": "mysql-iot-db"
+        "type": "datasource",
+        "uid": "-- Mixed --"
       },
       "fieldConfig": {
         "defaults": {
@@ -108,8 +108,8 @@
     },
     {
       "datasource": {
-        "type": "mysql",
-        "uid": "mysql-iot-db"
+        "type": "datasource",
+        "uid": "-- Mixed --"
       },
       "fieldConfig": {
         "defaults": {
@@ -181,8 +181,8 @@
     },
     {
       "datasource": {
-        "type": "mysql",
-        "uid": "mysql-iot-db"
+        "type": "datasource",
+        "uid": "-- Mixed --"
       },
       "fieldConfig": {
         "defaults": {
@@ -293,7 +293,7 @@
           ]
         }
       },
-      "title": "📡 MQTT SysCtrl Status",
+      "title": "📡 Pipeline Status: MQTT → API → InfluxDB",
       "type": "stat",
       "targets": [
         {
@@ -308,8 +308,8 @@
     },
     {
       "datasource": {
-        "type": "mysql",
-        "uid": "mysql-iot-db"
+        "type": "datasource",
+        "uid": "-- Mixed --"
       },
       "fieldConfig": {
         "defaults": {
@@ -358,6 +358,14 @@
       "targets": [
         {
           "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-iot"
+          },
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"_field\"] == \"rssi\")\n  |> last()",
+          "refId": "A"
+        },
+        {
+          "datasource": {
             "type": "mysql",
             "uid": "mysql-iot-db"
           },
@@ -365,14 +373,6 @@
           "format": "table",
           "rawQuery": true,
           "rawSql": "SELECT wifi_rssi FROM iot_devices WHERE device_serial = 'ETL-ESP32-001' LIMIT 1;",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-iot"
-          },
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -1h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"_field\"] == \"rssi\")\n  |> last()",
           "refId": "B"
         }
       ]
@@ -391,8 +391,8 @@
     },
     {
       "datasource": {
-        "type": "mysql",
-        "uid": "mysql-iot-db"
+        "type": "datasource",
+        "uid": "-- Mixed --"
       },
       "fieldConfig": {
         "defaults": {
@@ -447,6 +447,14 @@
       "targets": [
         {
           "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-iot"
+          },
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"_field\"] == \"temperature\")\n  |> last()",
+          "refId": "A"
+        },
+        {
+          "datasource": {
             "type": "mysql",
             "uid": "mysql-iot-db"
           },
@@ -454,7 +462,7 @@
           "format": "table",
           "rawQuery": true,
           "rawSql": "SELECT temperature_c FROM iot_devices WHERE device_serial = 'ETL-ESP32-001' LIMIT 1;",
-          "refId": "A"
+          "refId": "B"
         },
         {
           "datasource": {
@@ -462,22 +470,14 @@
             "uid": "prometheus"
           },
           "expr": "sysctrl_suhu{MCID=\"ETL-ESP32-001\"} or sysctrl_suhu or eternal_iot_suhu",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-iot"
-          },
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -1h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"_field\"] == \"temperature\")\n  |> last()",
           "refId": "C"
         }
       ]
     },
     {
       "datasource": {
-        "type": "mysql",
-        "uid": "mysql-iot-db"
+        "type": "datasource",
+        "uid": "-- Mixed --"
       },
       "fieldConfig": {
         "defaults": {
@@ -528,6 +528,14 @@
       "targets": [
         {
           "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-iot"
+          },
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"_field\"] == \"humidity\")\n  |> last()",
+          "refId": "A"
+        },
+        {
+          "datasource": {
             "type": "mysql",
             "uid": "mysql-iot-db"
           },
@@ -535,7 +543,7 @@
           "format": "table",
           "rawQuery": true,
           "rawSql": "SELECT humidity_pct FROM iot_devices WHERE device_serial = 'ETL-ESP32-001' LIMIT 1;",
-          "refId": "A"
+          "refId": "B"
         },
         {
           "datasource": {
@@ -543,22 +551,14 @@
             "uid": "prometheus"
           },
           "expr": "sysctrl_humidity{MCID=\"ETL-ESP32-001\"} or sysctrl_humidity or eternal_iot_humidity",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-iot"
-          },
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -1h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"_field\"] == \"humidity\")\n  |> last()",
           "refId": "C"
         }
       ]
     },
     {
       "datasource": {
-        "type": "mysql",
-        "uid": "mysql-iot-db"
+        "type": "datasource",
+        "uid": "-- Mixed --"
       },
       "fieldConfig": {
         "defaults": {
@@ -600,9 +600,17 @@
           "sort": "none"
         }
       },
-      "title": "📈 Grafik Riwayat Suhu (°C), Kelembapan (%) & Heat Index (InfluxDB + MySQL + Prometheus)",
+      "title": "📈 Grafik Riwayat Suhu (°C), Kelembapan (%) & Heat Index (Pipeline: InfluxDB + MySQL + MQTT)",
       "type": "timeseries",
       "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-iot"
+          },
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"_field\"] == \"temperature\" or r[\"_field\"] == \"humidity\" or r[\"_field\"] == \"heat_index\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield(name: \"mean\")",
+          "refId": "A"
+        },
         {
           "datasource": {
             "type": "mysql",
@@ -611,8 +619,8 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT UNIX_TIMESTAMP(recorded_at) AS time_sec, temperature_c AS 'Suhu (°C)', humidity_pct AS 'Kelembapan (%)', heat_index_c AS 'Heat Index (°C)' FROM iot_telemetry_logs WHERE $__timeFilter(recorded_at) ORDER BY recorded_at ASC;",
-          "refId": "A"
+          "rawSql": "SELECT UNIX_TIMESTAMP(recorded_at) AS time, temperature_c AS 'Suhu (°C)', humidity_pct AS 'Kelembapan (%)', heat_index_c AS 'Heat Index (°C)' FROM iot_telemetry_logs WHERE $__timeFilter(recorded_at) OR recorded_at >= NOW() - INTERVAL 12 HOUR ORDER BY recorded_at ASC;",
+          "refId": "B"
         },
         {
           "datasource": {
@@ -621,7 +629,7 @@
           },
           "expr": "sysctrl_suhu{MCID=\"ETL-ESP32-001\"} or sysctrl_suhu or eternal_iot_suhu",
           "legendFormat": "MQTT Suhu (°C)",
-          "refId": "B"
+          "refId": "C"
         },
         {
           "datasource": {
@@ -630,14 +638,6 @@
           },
           "expr": "sysctrl_humidity{MCID=\"ETL-ESP32-001\"} or sysctrl_humidity or eternal_iot_humidity",
           "legendFormat": "MQTT Humidity (%)",
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-iot"
-          },
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"_field\"] == \"temperature\" or r[\"_field\"] == \"humidity\" or r[\"_field\"] == \"heat_index\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield(name: \"mean\")",
           "refId": "D"
         }
       ]
@@ -651,13 +651,13 @@
         "y": 14
       },
       "id": 102,
-      "title": "🪪 Riwayat Tap Kartu NFC (ON/OFF Lock Toggle) & Daftar Pengguna NFC (MySQL iot_db)",
+      "title": "🪪 Riwayat Tap Kartu NFC & Daftar Pengguna Terdaftar (MySQL eternal_db)",
       "type": "row"
     },
     {
       "datasource": {
-        "type": "mysql",
-        "uid": "mysql-iot-db"
+        "type": "datasource",
+        "uid": "-- Mixed --"
       },
       "fieldConfig": {
         "defaults": {
@@ -701,8 +701,8 @@
     },
     {
       "datasource": {
-        "type": "mysql",
-        "uid": "mysql-iot-db"
+        "type": "datasource",
+        "uid": "-- Mixed --"
       },
       "fieldConfig": {
         "defaults": {

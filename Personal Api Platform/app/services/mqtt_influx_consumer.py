@@ -206,6 +206,71 @@ class MqttInfluxConsumer:
             if ok:
                 logger.debug(f"[MQTT->InfluxDB] Wrote telemetry for {device_serial} ({temp_val}°C, {hum_val}%)")
 
+            # Also sync latest snapshot & telemetry row to MySQL eternal_db for Grafana & Web Dashboards
+            self._sync_mysql_telemetry(
+                device_serial=str(device_serial),
+                device_name=str(device_name),
+                temp=temp_val,
+                hum=hum_val,
+                heat_idx=heat_val,
+                rssi=int(rssi),
+                is_locked=is_locked,
+                rem_sec=rem_sec,
+            )
+
+    def _sync_mysql_telemetry(
+        self,
+        device_serial: str,
+        device_name: str,
+        temp: float,
+        hum: float,
+        heat_idx: float,
+        rssi: int,
+        is_locked: int,
+        rem_sec: int,
+    ):
+        """Keep MySQL eternal_db snapshot & logs in sync with incoming MQTT telemetry."""
+        try:
+            from app.modules.iot.nfc_service import get_eternal_mysql_conn
+            conn = get_eternal_mysql_conn()
+            try:
+                with conn.cursor() as cur:
+                    # 1. Update latest snapshot in iot_devices
+                    cur.execute("""
+                        INSERT INTO iot_devices (device_serial, device_name, model, temperature_c, humidity_pct, heat_index_c, wifi_rssi, rssi, status, last_seen_at)
+                        VALUES (%s, %s, 'Eternal-ESP32', %s, %s, %s, %s, %s, 'online', NOW())
+                        ON DUPLICATE KEY UPDATE
+                            temperature_c = VALUES(temperature_c),
+                            humidity_pct = VALUES(humidity_pct),
+                            heat_index_c = VALUES(heat_index_c),
+                            wifi_rssi = VALUES(wifi_rssi),
+                            rssi = VALUES(rssi),
+                            status = 'online',
+                            last_seen_at = NOW();
+                    """, (device_serial, device_name, temp, hum, heat_idx, rssi, rssi))
+
+                    # 2. Append time-series point to iot_telemetry_logs
+                    if temp > 0 or hum > 0:
+                        cur.execute("""
+                            INSERT INTO iot_telemetry_logs (device_serial, temperature_c, humidity_pct, heat_index_c, wifi_rssi, recorded_at)
+                            VALUES (%s, %s, %s, %s, %s, NOW());
+                        """, (device_serial, temp, hum, heat_idx, rssi))
+
+                    # 3. Update device_locks if remaining_sec or lock state is present
+                    lock_str = "LOCKED" if is_locked == 1 else "UNLOCKED"
+                    cur.execute("""
+                        UPDATE device_locks
+                        SET is_locked = %s,
+                            lock_status = %s,
+                            unlock_duration_sec = %s,
+                            updated_at = NOW()
+                        WHERE device_serial = %s;
+                    """, (is_locked, lock_str, rem_sec, device_serial))
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug(f"[MQTT->MySQL Sync] Note: {e}")
+
 
 # Global singleton instance
 mqtt_influx_consumer = MqttInfluxConsumer()
