@@ -1,6 +1,8 @@
 # Master Homelab Server
 
-Arsitektur terpadu Homelab Server (`fa` - Dell OptiPlex 7050, Ubuntu 24.04.5 LTS) yang menyatukan 3 proyek inti ke dalam satu orkestrasi Docker terpusat dengan prinsip **Zero Container Duplication** ("Menggunakan yang sudah ada").
+Arsitektur terpadu Homelab Server (`fa` - Dell OptiPlex 7050, Ubuntu 24.04.5 LTS) yang menyatukan seluruh proyek inti ke dalam satu orkestrasi Docker terpusat dengan prinsip **Zero Container Duplication** ("Menggunakan yang sudah ada") & **Dedicated Database Isolation**.
+
+> 📖 **Panduan Alur Kerja & Komunikasi Antar-Proyek**: Untuk mempelajari bagaimana setiap modul, hardware ESP32, web dashboard, broker MQTT, dan database saling berkomunikasi secara realtime, silakan baca [**FLOW_SISTEM_HOMELAB.md**](file:///d:/repository/homelab-server/FLOW_SISTEM_HOMELAB.md).
 
 ---
 
