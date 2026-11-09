@@ -209,3 +209,4 @@ class MqttInfluxConsumer:
 
 # Global singleton instance
 mqtt_influx_consumer = MqttInfluxConsumer()
+

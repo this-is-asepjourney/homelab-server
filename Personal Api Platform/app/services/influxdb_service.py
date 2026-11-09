@@ -274,3 +274,4 @@ class InfluxDbService:
 
 # Global singleton instance
 influx_service = InfluxDbService()
+
