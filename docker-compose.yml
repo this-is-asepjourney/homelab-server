@@ -102,6 +102,14 @@ services:
       - ENCRYPTION_MASTER_KEY=${ENCRYPTION_MASTER_KEY:-dGhpcy1pcy1hLXNhbXBsZS1mZXJuZXQta2V5LTMyeS0=}
       - HOMELAB_AGENT_TOKEN=${HOMELAB_AGENT_TOKEN:-psm_agent_homelab_default_token}
       - PROMETHEUS_URL=${PROMETHEUS_URL:-http://host.docker.internal:9001}
+      - INFLUXDB_HOST=${INFLUXDB_HOST:-influxdb}
+      - INFLUXDB_PORT=${INFLUXDB_PORT:-8086}
+      - INFLUXDB_URL=${INFLUXDB_URL:-http://influxdb:8086}
+      - INFLUXDB_USER=${INFLUXDB_USER:-appuser}
+      - INFLUXDB_PASSWORD=${INFLUXDB_PASSWORD:-admin12345}
+      - INFLUXDB_ORG=${INFLUXDB_ORG:-homelab}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET:-eternal_telemetry}
+      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN:-homelab-influxdb-master-auth-token-2026}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -245,12 +253,46 @@ services:
       timeout: 5s
       retries: 3
 
+  # ═════════════════════════════════════════════════════════════════
+  # 6. INFLUXDB TIME-SERIES DATABASE (:8086)
+  # Dedicated TSDB for IoT Telemetry & Metrics (MQTT -> API -> InfluxDB -> Grafana)
+  # ═════════════════════════════════════════════════════════════════
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: homelab_influxdb
+    restart: unless-stopped
+    mem_limit: 384m
+    cpus: 0.5
+    ports:
+      - "${INFLUXDB_PORT:-8086}:8086"
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=${INFLUXDB_USER:-appuser}
+      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUXDB_PASSWORD:-admin12345}
+      - DOCKER_INFLUXDB_INIT_ORG=${INFLUXDB_ORG:-homelab}
+      - DOCKER_INFLUXDB_INIT_BUCKET=${INFLUXDB_BUCKET:-eternal_telemetry}
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUXDB_TOKEN:-homelab-influxdb-master-auth-token-2026}
+      - DOCKER_INFLUXDB_INIT_RETENTION=90d
+    volumes:
+      - influxdb-storage:/var/lib/influxdb2
+      - influxdb-config:/etc/influxdb2
+    networks:
+      - homelab-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8086/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
 # ─────────────────────────────────────────────────────────────────────────────
 # PERSISTENT VOLUMES
 # ─────────────────────────────────────────────────────────────────────────────
 volumes:
   psm-storage:
   homelab-backups:
+  influxdb-storage:
+  influxdb-config:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # INTERNAL NETWORKS

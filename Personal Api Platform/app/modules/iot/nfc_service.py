@@ -354,6 +354,22 @@ class NfcService:
                     action,
                 ))
 
+            # Auto-record NFC event to InfluxDB time-series database
+            try:
+                from app.services.influxdb_service import influx_service
+                influx_service.write_nfc_event(
+                    uid=raw_uid,
+                    user_name=nama,
+                    username=username,
+                    role=role,
+                    action=action,
+                    device_serial=device_serial,
+                    duration_sec=lock_sec,
+                    status="granted" if user else "denied"
+                )
+            except Exception:
+                pass
+
             return {
                 "status": "success",
                 "uid": raw_uid,

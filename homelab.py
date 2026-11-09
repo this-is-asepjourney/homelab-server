@@ -86,6 +86,7 @@ def cmd_status(args):
         ("PSM Web Dashboard Console", 3005, None),
         ("IoT Web Dashboard Hub", 8088, f"http://{host}:8088/"),
         ("IoT Telegraf Exporter", 9273, f"http://{host}:9273/metrics"),
+        ("InfluxDB Time-Series DB", 8086, f"http://{host}:8086/health"),
     ]
 
     for name, port, url in services_app:
@@ -275,6 +276,69 @@ def ensure_grafana_datasources(grafana_url: str, auth_header: str, host: str):
                 print(f"  [OK] Verifikasi Koneksi MySQL: SEHAT ({msg or 'Database Connection OK'})\n")
             else:
                 print(f"  [WARN] Verifikasi Koneksi MySQL: {status} - {msg}\n")
+    except Exception:
+        pass
+
+    # 4. InfluxDB eternal_telemetry Datasource (uid: influxdb-iot)
+    influx_ds = next(
+        (d for d in existing_ds if d.get("uid") == "influxdb-iot" or "influx" in d.get("name", "").lower()),
+        None
+    )
+    influx_payload = {
+        "name": "InfluxDB - eternal_telemetry",
+        "type": "influxdb",
+        "uid": "influxdb-iot",
+        "access": "proxy",
+        "url": f"http://{host}:8086",
+        "isDefault": False,
+        "jsonData": {
+            "version": "Flux",
+            "organization": "homelab",
+            "defaultBucket": "eternal_telemetry",
+            "tlsSkipVerify": True
+        },
+        "secureJsonData": {
+            "token": "homelab-influxdb-master-auth-token-2026"
+        }
+    }
+    if influx_ds:
+        ds_id = influx_ds.get("id")
+        influx_payload["id"] = ds_id
+        try:
+            req = urllib.request.Request(
+                f"{grafana_url}/api/datasources/{ds_id}",
+                data=json.dumps(influx_payload).encode(),
+                headers=headers,
+                method="PUT"
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                print(f"  [OK] Datasource InfluxDB (id={ds_id}, uid=influxdb-iot) berhasil diperbarui!")
+        except Exception as e:
+            print(f"  [WARN] Gagal memperbarui datasource InfluxDB: {e}")
+    else:
+        try:
+            req = urllib.request.Request(
+                f"{grafana_url}/api/datasources",
+                data=json.dumps(influx_payload).encode(),
+                headers=headers,
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                print("  [OK] Datasource InfluxDB (uid: influxdb-iot) berhasil didaftarkan!")
+        except Exception as e:
+            print(f"  [WARN] Gagal membuat datasource InfluxDB: {e}")
+
+    # 5. Test InfluxDB datasource health
+    try:
+        req = urllib.request.Request(f"{grafana_url}/api/datasources/uid/influxdb-iot/health", headers=headers)
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            health = json.loads(resp.read().decode())
+            status = health.get("status", "UNKNOWN")
+            msg = health.get("message", "")
+            if status == "OK":
+                print(f"  [OK] Verifikasi Koneksi InfluxDB: SEHAT ({msg or 'Datasource Connection OK'})\n")
+            else:
+                print(f"  [WARN] Verifikasi Koneksi InfluxDB: {status} - {msg}\n")
     except Exception:
         pass
 

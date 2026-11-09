@@ -24,3 +24,17 @@ datasources:
       timezone: Asia/Jakarta
     secureJsonData:
       password: admin12345
+
+  - name: InfluxDB - eternal_telemetry
+    uid: influxdb-iot
+    type: influxdb
+    access: proxy
+    url: http://192.168.25.101:8086
+    isDefault: false
+    jsonData:
+      version: Flux
+      organization: homelab
+      defaultBucket: eternal_telemetry
+      tlsSkipVerify: true
+    secureJsonData:
+      token: homelab-influxdb-master-auth-token-2026

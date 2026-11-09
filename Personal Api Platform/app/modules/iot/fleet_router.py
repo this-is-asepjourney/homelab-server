@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import time
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
@@ -813,5 +813,123 @@ def register_nfc_user_from_device(payload: dict):
 def nfc_hardware_handshake(payload: dict):
     """Device online handshake confirmation."""
     return {"status": "ok", "message": "NFC Hardware Handshake Accepted", "timestamp": "now"}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# INFLUXDB TIME-SERIES & IOT TELEMETRY INGESTION ENDPOINTS
+# Flow: ESP32 / MQTT -> Central API Gateway (:8000) -> InfluxDB (:8086) -> Grafana (:3001)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@compat_devices_router.get("/api/influx/health")
+def influxdb_health():
+    """Check connectivity and health of InfluxDB v2 time-series database."""
+    from app.services.influxdb_service import influx_service
+    return influx_service.check_health()
+
+
+@compat_devices_router.post("/api/influx/write")
+@compat_devices_router.post("/api/iot/telemetry/influx")
+@compat_devices_router.post("/api/iot/telemetry")
+async def ingest_iot_telemetry_influx(request: Request):
+    """
+    Ingest IoT telemetry point or NFC event into InfluxDB (:8086).
+    Accepts JSON body or raw InfluxDB Line Protocol string.
+    """
+    from app.services.influxdb_service import influx_service
+
+    content_type = request.headers.get("content-type", "")
+    body_bytes = await request.body()
+
+    # Case 1: Raw Line Protocol payload
+    if "text/plain" in content_type or (b"=" in body_bytes and b"{" not in body_bytes[:10]):
+        try:
+            line = body_bytes.decode("utf-8").strip()
+            ok = influx_service.write_line_protocol(line)
+            return {"status": "success" if ok else "warning", "mode": "line_protocol", "written": ok}
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Line protocol parse error: {e}")
+
+    # Case 2: JSON payload
+    try:
+        import json
+        payload = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON or Line Protocol payload")
+
+    serial = payload.get("serial") or payload.get("device_serial") or payload.get("MCID") or "ETL-ESP32-001"
+    name = payload.get("device") or payload.get("nama") or "Eternal"
+    temp = float(payload.get("suhu") or payload.get("temperature") or payload.get("temp") or 0.0)
+    hum = float(payload.get("humidity") or payload.get("hum") or 0.0)
+    heat_idx = float(payload.get("heat_index") or payload.get("heatIndex") or temp)
+    rssi = int(payload.get("rssi") or payload.get("wifi_rssi") or -55)
+    
+    is_locked_val = payload.get("is_locked")
+    if is_locked_val is None:
+        lock_str = str(payload.get("lock_status", "")).upper()
+        is_locked = 0 if "UNLOCK" in lock_str or "OPEN" in lock_str else 1
+    else:
+        is_locked = 1 if is_locked_val in (1, True, "1", "true") else 0
+
+    rem_sec = int(payload.get("remaining_sec") or 0)
+    uptime = int(payload.get("uptime_sec") or payload.get("uptime") or 0)
+    heap = int(payload.get("free_heap") or payload.get("heap") or 0)
+
+    extra_tags = {}
+    if "ip" in payload:
+        extra_tags["ip"] = str(payload["ip"])
+    if "mac" in payload:
+        extra_tags["mac"] = str(payload["mac"])
+
+    ok = influx_service.write_telemetry(
+        device_serial=str(serial),
+        device_name=str(name),
+        temperature=temp,
+        humidity=hum,
+        heat_index=heat_idx,
+        rssi=rssi,
+        is_locked=is_locked,
+        remaining_sec=rem_sec,
+        uptime_sec=uptime,
+        free_heap=heap,
+        extra_tags=extra_tags,
+    )
+
+    # If payload also contains NFC event, record NFC metric
+    if "uid" in payload:
+        uid = str(payload["uid"])
+        user_name = payload.get("nama") or "Tamu"
+        role = payload.get("role") or "Operator"
+        action = payload.get("action") or "TAP_ON"
+        influx_service.write_nfc_event(
+            uid=uid,
+            user_name=user_name,
+            role=role,
+            action=action,
+            device_serial=str(serial),
+            duration_sec=rem_sec or 7200,
+            status=payload.get("status", "granted")
+        )
+
+    return {
+        "status": "success" if ok else "warning",
+        "database": "influxdb",
+        "bucket": influx_service.bucket,
+        "written": ok,
+        "device": str(serial),
+        "temperature": temp,
+        "humidity": hum,
+        "is_locked": is_locked
+    }
+
+
+@compat_devices_router.get("/api/influx/telemetry/latest")
+def get_latest_influx_telemetry(serial: str = Query("ETL-ESP32-001")):
+    """Retrieve the latest telemetry readings from InfluxDB."""
+    from app.services.influxdb_service import influx_service
+    res = influx_service.get_latest_telemetry(device_serial=serial)
+    if not res:
+        return {"status": "nodata", "message": f"No recent telemetry for device {serial}", "data": None}
+    return {"status": "success", "data": res}
+
 
 

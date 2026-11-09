@@ -95,6 +95,14 @@
           "rawQuery": true,
           "rawSql": "SELECT CASE WHEN is_locked = 0 THEN 1 ELSE 0 END AS unlock_on FROM device_locks WHERE device_serial = 'ETL-ESP32-001' LIMIT 1;",
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-iot"
+          },
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -1h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"_field\"] == \"is_locked\")\n  |> map(fn: (r) => ({r with _value: if r._value == 0 then 1 else 0}))\n  |> last()",
+          "refId": "B"
         }
       ]
     },
@@ -160,6 +168,14 @@
           "rawQuery": true,
           "rawSql": "SELECT CASE WHEN is_locked = 0 AND unlock_expires_at > NOW() THEN TIMESTAMPDIFF(SECOND, NOW(), unlock_expires_at) ELSE 0 END AS remaining_sec FROM device_locks WHERE device_serial = 'ETL-ESP32-001' LIMIT 1;",
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-iot"
+          },
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -1h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"_field\"] == \"remaining_sec\")\n  |> last()",
+          "refId": "B"
         }
       ]
     },
@@ -350,6 +366,14 @@
           "rawQuery": true,
           "rawSql": "SELECT wifi_rssi FROM iot_devices WHERE device_serial = 'ETL-ESP32-001' LIMIT 1;",
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-iot"
+          },
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -1h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"_field\"] == \"rssi\")\n  |> last()",
+          "refId": "B"
         }
       ]
     },
@@ -362,7 +386,7 @@
         "y": 5
       },
       "id": 101,
-      "title": "🌡️ Sensor Suhu, Kelembapan & Heat Index Realtime (MQTT Prometheus & MySQL iot_db)",
+      "title": "🌡️ Sensor Suhu, Kelembapan & Heat Index Realtime (InfluxDB TSDB, MQTT & MySQL)",
       "type": "row"
     },
     {
@@ -439,6 +463,14 @@
           },
           "expr": "sysctrl_suhu{MCID=\"ETL-ESP32-001\"} or sysctrl_suhu or eternal_iot_suhu",
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-iot"
+          },
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -1h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"_field\"] == \"temperature\")\n  |> last()",
+          "refId": "C"
         }
       ]
     },
@@ -512,6 +544,14 @@
           },
           "expr": "sysctrl_humidity{MCID=\"ETL-ESP32-001\"} or sysctrl_humidity or eternal_iot_humidity",
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-iot"
+          },
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -1h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"_field\"] == \"humidity\")\n  |> last()",
+          "refId": "C"
         }
       ]
     },
@@ -560,7 +600,7 @@
           "sort": "none"
         }
       },
-      "title": "📈 Grafik Riwayat Suhu (°C), Kelembapan (%) & Heat Index (MySQL iot_db + MQTT Prometheus)",
+      "title": "📈 Grafik Riwayat Suhu (°C), Kelembapan (%) & Heat Index (InfluxDB + MySQL + Prometheus)",
       "type": "timeseries",
       "targets": [
         {
@@ -591,6 +631,14 @@
           "expr": "sysctrl_humidity{MCID=\"ETL-ESP32-001\"} or sysctrl_humidity or eternal_iot_humidity",
           "legendFormat": "MQTT Humidity (%)",
           "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-iot"
+          },
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"_field\"] == \"temperature\" or r[\"_field\"] == \"humidity\" or r[\"_field\"] == \"heat_index\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield(name: \"mean\")",
+          "refId": "D"
         }
       ]
     },

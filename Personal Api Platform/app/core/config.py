@@ -72,6 +72,16 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    # InfluxDB v2 Settings (Dedicated IoT Telemetry TSDB)
+    INFLUXDB_HOST: str = "influxdb"
+    INFLUXDB_PORT: int = 8086
+    INFLUXDB_URL: str = "http://influxdb:8086"
+    INFLUXDB_USER: str = "appuser"
+    INFLUXDB_PASSWORD: str = "admin12345"
+    INFLUXDB_ORG: str = "homelab"
+    INFLUXDB_BUCKET: str = "eternal_telemetry"
+    INFLUXDB_TOKEN: str = "homelab-influxdb-master-auth-token-2026"
+
     # Prometheus & Monitoring
     PROMETHEUS_URL: str = "http://host.docker.internal:9001"
     PROMETHEUS_TIMEOUT_SECONDS: float = 5.0

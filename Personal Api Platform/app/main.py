@@ -66,7 +66,21 @@ async def _lifespan(application: FastAPI):
         except Exception as e:
             print(f"[PAP Core] PSM DB init notice: {e}")
 
+    # 3. Start Realtime MQTT -> InfluxDB Consumer Worker (MQTT -> API -> InfluxDB -> Grafana)
+    try:
+        from app.services.mqtt_influx_consumer import mqtt_influx_consumer
+        mqtt_influx_consumer.start()
+        print("[PAP Core] MQTT -> InfluxDB Realtime Consumer worker active.")
+    except Exception as e:
+        print(f"[PAP Core] MQTT Influx consumer notice: {e}")
+
     yield
+
+    try:
+        from app.services.mqtt_influx_consumer import mqtt_influx_consumer
+        mqtt_influx_consumer.stop()
+    except Exception:
+        pass
 
 
 def create_app() -> FastAPI:
