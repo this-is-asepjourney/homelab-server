@@ -71,6 +71,7 @@ services:
       dockerfile: docker/Dockerfile
     container_name: pap-api
     restart: unless-stopped
+    stop_grace_period: 3s
     env_file:
       - .env
     ports:

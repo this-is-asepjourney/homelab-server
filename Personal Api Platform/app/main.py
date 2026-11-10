@@ -78,6 +78,12 @@ async def _lifespan(application: FastAPI):
     yield
 
     try:
+        from app.modules.traffic.broadcaster import traffic_broadcaster
+        await traffic_broadcaster.shutdown()
+    except Exception:
+        pass
+
+    try:
         from app.services.mqtt_influx_consumer import mqtt_influx_consumer
         mqtt_influx_consumer.stop()
     except Exception:

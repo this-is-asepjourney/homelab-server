@@ -29,6 +29,7 @@ class MqttInfluxConsumer:
         self.client_id = f"pap-influx-consumer-{int(time.time())}"
         self.client = None
         self.is_running = False
+        self.stop_event = threading.Event()
         self.worker_thread = None
 
         self.topics = [
@@ -50,21 +51,27 @@ class MqttInfluxConsumer:
         if self.is_running:
             return
         self.is_running = True
+        self.stop_event.clear()
         self.worker_thread = threading.Thread(target=self._run_loop, daemon=True, name="MqttInfluxWorker")
         self.worker_thread.start()
         logger.info(f"[MQTT->InfluxDB] Background consumer worker started on {self.host}:{self.port}")
 
     def stop(self):
         self.is_running = False
+        self.stop_event.set()
         if self.client:
             try:
                 self.client.disconnect()
             except Exception:
                 pass
+            try:
+                self.client.loop_stop()
+            except Exception:
+                pass
 
     def _run_loop(self):
         """Thread worker loop with automatic reconnection."""
-        while self.is_running:
+        while self.is_running and not self.stop_event.is_set():
             try:
                 import paho.mqtt.client as mqtt
 
@@ -87,10 +94,21 @@ class MqttInfluxConsumer:
 
                 logger.info(f"[MQTT->InfluxDB] Connecting to Mosquitto {self.host}:{self.port}...")
                 client.connect(self.host, self.port, keepalive=60)
-                client.loop_forever(retry_first_connection=True)
+                client.loop_start()
+
+                while self.is_running and not self.stop_event.is_set():
+                    self.stop_event.wait(timeout=1.0)
+
+                try:
+                    client.loop_stop()
+                    client.disconnect()
+                except Exception:
+                    pass
             except Exception as e:
+                if not self.is_running or self.stop_event.is_set():
+                    break
                 logger.warning(f"[MQTT->InfluxDB] Connection error: {e}. Retrying in 10s...")
-                time.sleep(10)
+                self.stop_event.wait(timeout=10)
 
     def _on_connect(self, client, userdata, flags, rc, *args):
         if rc == 0:

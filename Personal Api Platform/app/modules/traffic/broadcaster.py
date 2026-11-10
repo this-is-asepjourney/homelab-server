@@ -198,9 +198,27 @@ class TrafficBroadcaster:
         try:
             while True:
                 event = await q.get()
+                if event is None:
+                    break
                 yield f"data: {json.dumps(event)}\n\n"
         finally:
             self._subscribers.discard(q)
+
+    async def shutdown(self):
+        """Immediately closes all live WebSocket connections and wakes SSE generators on shutdown."""
+        for ws in list(self._websockets):
+            try:
+                await ws.close(code=1001, reason="Server shutdown")
+            except Exception:
+                pass
+        self._websockets.clear()
+
+        for q in list(self._subscribers):
+            try:
+                q.put_nowait(None)
+            except Exception:
+                pass
+        self._subscribers.clear()
 
     def get_recent(self) -> List[Dict[str, Any]]:
         return list(self._history)
