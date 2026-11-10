@@ -234,7 +234,7 @@ def seed_platform_registry(db: Session, seed_iot_fleet: bool = True) -> dict[str
                         project_id=project.id,
                         name="stock-umkm-laravel-api",
                         integration_type="laravel_api",
-                        configuration={"base_url": "http://192.168.25.101:8080/api"},
+                        configuration={"base_url": "http://192.168.25.101:8000/api"},
                         secret_reference="STOCK_UMKM_API_KEY",
                         is_active=True,
                     )

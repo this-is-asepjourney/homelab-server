@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     STOCK_DB_NAME: str = "appdb"
     STOCK_DB_USER: str = "appuser"
     STOCK_DB_PASSWORD: str = "admin12345"
-    STOCK_UMKM_API_URL: str = "http://192.168.25.101:8080/api"
+    STOCK_UMKM_API_URL: str = "http://192.168.25.101:8000/api"
     STOCK_UMKM_API_KEY: str = "REPLACE_ME"
 
     # POS Cashier integration reference
