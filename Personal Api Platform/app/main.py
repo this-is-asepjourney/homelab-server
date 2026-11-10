@@ -40,12 +40,23 @@ try:
     from apps.api.app.main import init_db as init_psm_db
     from apps.api.app.websocket.handlers import ws_router as psm_ws_router
     HAS_PSM_DIRECT = True
-except Exception as e:
-    HAS_PSM_DIRECT = False
-    psm_api_router = None
-    psm_ws_router = None
-    init_psm_db = None
-    print(f"[PAP Gateway] Note on PSM direct router load: {e}")
+except Exception:
+    # Automatic fallback for local development: locate Personal_Server_Manager
+    import sys
+    psm_dir = Path(__file__).resolve().parent.parent.parent / "Personal_Server_Manager"
+    if psm_dir.exists() and str(psm_dir) not in sys.path:
+        sys.path.insert(0, str(psm_dir))
+    try:
+        from apps.api.app.api.v1.router import api_router as psm_api_router
+        from apps.api.app.main import init_db as init_psm_db
+        from apps.api.app.websocket.handlers import ws_router as psm_ws_router
+        HAS_PSM_DIRECT = True
+    except Exception as e:
+        HAS_PSM_DIRECT = False
+        psm_api_router = None
+        psm_ws_router = None
+        init_psm_db = None
+        print(f"[PAP Gateway] Note on PSM direct router load: {e}")
 
 
 @asynccontextmanager

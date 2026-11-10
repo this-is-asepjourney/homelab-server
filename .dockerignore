@@ -1,0 +1,17 @@
+.git
+.gitignore
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.venv
+node_modules
+.next
+dist
+build
+storage
+homelab-backups
+psm-storage
+*.log
+*.tar.gz

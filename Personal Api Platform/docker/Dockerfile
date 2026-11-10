@@ -14,13 +14,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gzip \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY ["Personal Api Platform/requirements.txt", "./"]
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app ./app
-COPY apps ./apps
-COPY migrations ./migrations
-COPY alembic.ini ./alembic.ini
+# Single Source of Truth: Copy PAP Core & PSM Control Plane
+COPY ["Personal Api Platform/app", "./app"]
+COPY ["Personal_Server_Manager/apps/api", "./apps/api"]
+COPY ["Personal Api Platform/migrations", "./migrations"]
+COPY ["Personal Api Platform/alembic.ini", "./alembic.ini"]
 
 # Ensure directories for backups and storage exist
 RUN mkdir -p /app/backups /opt/psm/uploads /opt/psm/releases

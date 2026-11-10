@@ -67,8 +67,8 @@ services:
   # ═════════════════════════════════════════════════════════════════
   pap-api:
     build:
-      context: "./Personal Api Platform"
-      dockerfile: docker/Dockerfile
+      context: .
+      dockerfile: "Personal Api Platform/docker/Dockerfile"
     container_name: pap-api
     restart: unless-stopped
     stop_grace_period: 3s
@@ -117,7 +117,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./Personal Api Platform/app:/app/app:rw
-      - ./Personal Api Platform/apps:/app/apps:rw
+      - ./Personal_Server_Manager/apps/api:/app/apps/api:rw
       - psm-storage:/opt/psm
       - homelab-backups:/app/backups
       - ./dns/homelab.hosts:/app/dns/homelab.hosts:rw
@@ -150,8 +150,8 @@ services:
   # ═════════════════════════════════════════════════════════════════
   pap-worker:
     build:
-      context: "./Personal Api Platform"
-      dockerfile: docker/Dockerfile
+      context: .
+      dockerfile: "Personal Api Platform/docker/Dockerfile"
     container_name: pap-worker
     restart: unless-stopped
     stop_grace_period: 3s
@@ -200,7 +200,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./Personal Api Platform/app:/app/app:rw
-      - ./Personal Api Platform/apps:/app/apps:rw
+      - ./Personal_Server_Manager/apps/api:/app/apps/api:rw
       - homelab-backups:/app/backups
       - ./dns/homelab.hosts:/app/dns/homelab.hosts:rw
       - ./router/conf.d/projects:/app/router/conf.d/projects:rw
