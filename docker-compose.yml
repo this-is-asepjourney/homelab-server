@@ -77,6 +77,8 @@ services:
     ports:
       - "${PAP_PORT:-8000}:8000"
     environment:
+      - ROLE=api
+      - ENABLE_MQTT_CONSUMER=false
       - POSTGRES_DB=${POSTGRES_DB:-psm}
       - POSTGRES_USER=${POSTGRES_USER:-appuser}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-admin12345}
@@ -141,6 +143,75 @@ services:
           - pap-api
           - api
           - psm-api
+
+  # ═════════════════════════════════════════════════════════════════
+  # 3b. PAP BACKGROUND WORKER (Decoupled Engine for IoT, MQTT & Automation)
+  # Menjalankan consumer MQTT InfluxDB, auto-backup scheduler, dan IoT fleet watchdog
+  # ═════════════════════════════════════════════════════════════════
+  pap-worker:
+    build:
+      context: "./Personal Api Platform"
+      dockerfile: docker/Dockerfile
+    container_name: pap-worker
+    restart: unless-stopped
+    stop_grace_period: 3s
+    command: ["python", "-m", "app.worker"]
+    env_file:
+      - .env
+    environment:
+      - ROLE=worker
+      - PAP_API_URL=http://pap-api:8000
+      - ENABLE_AUTO_BACKUP=true
+      - BACKUP_INTERVAL_HOURS=24
+      - BACKUP_RETENTION_DAYS=7
+      - POSTGRES_DB=${POSTGRES_DB:-psm}
+      - POSTGRES_USER=${POSTGRES_USER:-appuser}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-admin12345}
+      - POSTGRES_HOST=${POSTGRES_HOST:-192.168.25.101}
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg2://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-admin12345}@${POSTGRES_HOST:-192.168.25.101}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-psm}}
+      - PAP_DATABASE_URL=${PAP_DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-admin12345}@${POSTGRES_HOST:-192.168.25.101}:${POSTGRES_PORT:-5432}/pap_core}
+      - STOCK_DB_HOST=${STOCK_DB_HOST:-192.168.25.101}
+      - STOCK_DB_PORT=${STOCK_DB_PORT:-3306}
+      - STOCK_DB_NAME=${STOCK_DB_NAME:-appdb}
+      - STOCK_DB_USER=${STOCK_DB_USER:-appuser}
+      - STOCK_DB_PASSWORD=${STOCK_DB_PASSWORD:-admin12345}
+      - MYSQL_HOST=${MYSQL_HOST:-192.168.25.101}
+      - MYSQL_PORT=${MYSQL_PORT:-3306}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-adminroot12345}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-appdb}
+      - MYSQL_USER=${MYSQL_USER:-appuser}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-admin12345}
+      - BACKUP_STORAGE_DIR=/app/backups
+      - PROMETHEUS_URL=${PROMETHEUS_URL:-http://host.docker.internal:9001}
+      - MQTT_HOST=${MQTT_HOST:-192.168.25.101}
+      - MQTT_PORT=${MQTT_PORT:-1883}
+      - MQTT_USERNAME=${MQTT_USERNAME:-useriot}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-25022002}
+      - INFLUXDB_HOST=${INFLUXDB_HOST:-influxdb}
+      - INFLUXDB_PORT=${INFLUXDB_PORT:-8086}
+      - INFLUXDB_URL=${INFLUXDB_URL:-http://influxdb:8086}
+      - INFLUXDB_USER=${INFLUXDB_USER:-appuser}
+      - INFLUXDB_PASSWORD=${INFLUXDB_PASSWORD:-admin12345}
+      - INFLUXDB_ORG=${INFLUXDB_ORG:-homelab}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET:-eternal_telemetry}
+      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN:-homelab-influxdb-master-auth-token-2026}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./Personal Api Platform/app:/app/app:rw
+      - ./Personal Api Platform/apps:/app/apps:rw
+      - homelab-backups:/app/backups
+      - ./dns/homelab.hosts:/app/dns/homelab.hosts:rw
+      - ./router/conf.d/projects:/app/router/conf.d/projects:rw
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    mem_limit: 256m
+    cpus: 0.50
+    depends_on:
+      pap-api:
+        condition: service_started
+    networks:
+      - homelab-network
 
   # ═════════════════════════════════════════════════════════════════
   # 4. PERSONAL SERVER MANAGER (PSM Frontend Web & Local Agent)

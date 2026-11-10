@@ -663,6 +663,44 @@ class BackupService:
             return False
 
     @classmethod
+    def prune_backups(cls, keep_days: int = 7, keep_min: int = 3) -> Dict[str, Any]:
+        """Prunes backup archives older than keep_days while retaining at least keep_min latest backups."""
+        backups = cls.list_backups()
+        if len(backups) <= keep_min:
+            return {"pruned": 0, "remaining": len(backups), "pruned_files": []}
+
+        now_ts = datetime.now(timezone.utc).timestamp()
+        cutoff_sec = max(1, keep_days) * 86400
+        pruned_files = []
+
+        # List is already sorted newest first; protect the first keep_min items
+        candidates = backups[keep_min:]
+        for b in candidates:
+            created_at_str = b.get("created_at")
+            if not created_at_str:
+                continue
+            try:
+                # Handle ISO 8601 parsing
+                if created_at_str.endswith("Z"):
+                    created_at_str = created_at_str[:-1] + "+00:00"
+                created_dt = datetime.fromisoformat(created_at_str)
+                age_sec = now_ts - created_dt.timestamp()
+                if age_sec > cutoff_sec:
+                    filename = b.get("filename")
+                    if filename and cls.delete_backup(filename):
+                        pruned_files.append(filename)
+                        logger.info("Pruned old backup archive: %s (age %.1f days)", filename, age_sec / 86400)
+            except Exception as e:
+                logger.debug("Skip pruning candidate %s: %s", b.get("filename"), e)
+                continue
+
+        return {
+            "pruned": len(pruned_files),
+            "remaining": len(backups) - len(pruned_files),
+            "pruned_files": pruned_files,
+        }
+
+    @classmethod
     def get_backup_path(cls, filename: str) -> Optional[Path]:
         """Validates and returns the Path for downloading."""
         safe_name = Path(filename).name

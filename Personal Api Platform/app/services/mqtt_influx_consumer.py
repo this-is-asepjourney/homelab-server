@@ -10,6 +10,7 @@ import json
 import os
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict
 
 from app.core.config import get_settings
@@ -31,6 +32,10 @@ class MqttInfluxConsumer:
         self.is_running = False
         self.stop_event = threading.Event()
         self.worker_thread = None
+        self.connected = False
+        self.messages_count = 0
+        self.last_message_at = None
+        self.last_topic = None
 
         self.topics = [
             ("/SysCtrl", 0),
@@ -112,19 +117,25 @@ class MqttInfluxConsumer:
 
     def _on_connect(self, client, userdata, flags, rc, *args):
         if rc == 0:
+            self.connected = True
             logger.info(f"[MQTT->InfluxDB] Connected to broker {self.host}:{self.port}!")
             for topic, qos in self.topics:
                 client.subscribe(topic, qos)
                 logger.info(f"[MQTT->InfluxDB] Subscribed to topic: {topic}")
         else:
+            self.connected = False
             logger.warning(f"[MQTT->InfluxDB] Connect failed with code {rc}")
 
     def _on_disconnect(self, client, userdata, *args):
+        self.connected = False
         logger.warning("[MQTT->InfluxDB] Disconnected from Mosquitto broker")
 
     def _on_message(self, client, userdata, msg):
         """Process incoming telemetry message and write to InfluxDB."""
         try:
+            self.messages_count += 1
+            self.last_message_at = datetime.now(timezone.utc).isoformat()
+            self.last_topic = msg.topic
             topic = msg.topic
             raw_payload = msg.payload.decode("utf-8", errors="replace").strip()
             if not raw_payload:
@@ -143,6 +154,17 @@ class MqttInfluxConsumer:
             self._process_payload(topic, data)
         except Exception as e:
             logger.debug(f"[MQTT->InfluxDB] Error handling message on {msg.topic}: {e}")
+
+    def get_status(self) -> Dict[str, Any]:
+        """Returns the consumer health status and telemetry counters."""
+        return {
+            "running": self.is_running,
+            "connected": self.connected,
+            "broker": f"{self.host}:{self.port}",
+            "messages_count": self.messages_count,
+            "last_message_at": self.last_message_at,
+            "last_topic": self.last_topic,
+        }
 
     def _process_payload(self, topic: str, data: Dict[str, Any]):
         # Extract common fields

@@ -1,7 +1,7 @@
 """API endpoints for Real-time Traffic Streaming and Topology Telemetry."""
 
 import asyncio
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -63,6 +63,39 @@ async def get_traffic_stats() -> Dict[str, Any]:
         "status": "success",
         "data": traffic_broadcaster.get_stats(),
     }
+
+
+class TrafficEventPayload(BaseModel):
+    method: str = "GET"
+    path: str = "/"
+    status: int = 200
+    duration_ms: float = 1.0
+    client_ip: str = "127.0.0.1"
+    source: Optional[str] = None
+    target: str = "core"
+    sub_target: Optional[str] = None
+    tag: Optional[str] = None
+    color: Optional[str] = None
+    detail: Optional[str] = None
+
+
+@router.post("/event")
+async def ingest_traffic_event(payload: TrafficEventPayload) -> Dict[str, Any]:
+    """Ingests a traffic event into the broadcaster from external workers or decoupled background tasks."""
+    traffic_broadcaster.record_and_broadcast(
+        method=payload.method,
+        path=payload.path,
+        status=payload.status,
+        duration_ms=payload.duration_ms,
+        client_ip=payload.client_ip,
+        source=payload.source,
+        target=payload.target,
+        sub_target=payload.sub_target,
+        tag=payload.tag,
+        color=payload.color,
+        detail=payload.detail,
+    )
+    return {"status": "ok"}
 
 
 @router.post("/simulate")

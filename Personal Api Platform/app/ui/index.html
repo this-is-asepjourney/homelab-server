@@ -721,6 +721,10 @@
               <span class="badge badge-success">Port 8000 • Healthy</span>
             </li>
             <li class="status-item">
+              <span class="status-name">⚙️ Decoupled Background Worker (pap-worker)</span>
+              <span class="badge badge-success" id="worker-status-badge">Worker Active • Decoupled</span>
+            </li>
+            <li class="status-item">
               <span class="status-name">⚙️ PSM Control Plane Engine</span>
               <span class="badge badge-success">Unified in PAP</span>
             </li>
@@ -942,8 +946,14 @@
               <tr>
                 <td><b>pap-api</b></td>
                 <td><code style="color: #34d399;">8000 (HTTP)</code></td>
-                <td>Central Core API &bull; PSM Engine &bull; IoT Orchestrator</td>
-                <td>Core Application</td>
+                <td>Central Core API &bull; PSM Engine &bull; Ingress &amp; Traffic Gateway</td>
+                <td>Core API Gateway</td>
+              </tr>
+              <tr>
+                <td><b>pap-worker</b></td>
+                <td><code style="color: #38bdf8;">Daemon (Isolated)</code></td>
+                <td>Decoupled Background Engine &bull; MQTT Influx Consumer &bull; Auto-Backup Scheduler &bull; IoT Fleet Watchdog</td>
+                <td><span class="badge badge-success">Background Worker (Decoupled)</span></td>
               </tr>
               <tr>
                 <td><b>psm-web</b></td>
@@ -2037,6 +2047,28 @@
     // ═════════════════════════════════════════════════════════════════════════
     // INITIALIZATION
     // ═════════════════════════════════════════════════════════════════════════
+    async function checkWorkerStatus() {
+      const el = document.getElementById('worker-status-badge');
+      if (!el) return;
+      try {
+        const res = await fetch('/api/v1/system/worker-status');
+        if (res.ok) {
+          const json = await res.json();
+          const d = json.data || {};
+          if (d.healthy) {
+            el.className = 'badge badge-success';
+            el.innerText = `Worker Active • Decoupled (${d.details?.uptime_sec || 0}s)`;
+          } else if (d.status === 'not_registered') {
+            el.className = 'badge badge-info';
+            el.innerText = 'Internal Mode';
+          } else {
+            el.className = 'badge badge-danger';
+            el.innerText = `Worker ${d.status}`;
+          }
+        }
+      } catch (e) {}
+    }
+
     window.addEventListener('resize', resizeCanvas);
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -2046,6 +2078,8 @@
       hydrateInitialTraffic();
       connectRealtimeTraffic();
       loadBackups();
+      checkWorkerStatus();
+      setInterval(checkWorkerStatus, 15000);
     });
   </script>
 </body>

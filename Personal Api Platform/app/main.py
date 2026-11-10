@@ -67,13 +67,17 @@ async def _lifespan(application: FastAPI):
         except Exception as e:
             print(f"[PAP Core] PSM DB init notice: {e}")
 
-    # 3. Start Realtime MQTT -> InfluxDB Consumer Worker (MQTT -> API -> InfluxDB -> Grafana)
-    try:
-        from app.services.mqtt_influx_consumer import mqtt_influx_consumer
-        mqtt_influx_consumer.start()
-        print("[PAP Core] MQTT -> InfluxDB Realtime Consumer worker active.")
-    except Exception as e:
-        print(f"[PAP Core] MQTT Influx consumer notice: {e}")
+    # 3. Start Realtime MQTT -> InfluxDB Consumer Worker (if enabled on this node)
+    enable_mqtt = os.getenv("ENABLE_MQTT_CONSUMER", "false").lower() in ("true", "1", "yes")
+    if enable_mqtt:
+        try:
+            from app.services.mqtt_influx_consumer import mqtt_influx_consumer
+            mqtt_influx_consumer.start()
+            print("[PAP Core] MQTT -> InfluxDB Realtime Consumer worker active (in-process).")
+        except Exception as e:
+            print(f"[PAP Core] MQTT Influx consumer notice: {e}")
+    else:
+        print("[PAP Core] MQTT Consumer decoupled. Background workload delegated to pap-worker service.")
 
     yield
 
@@ -85,7 +89,8 @@ async def _lifespan(application: FastAPI):
 
     try:
         from app.services.mqtt_influx_consumer import mqtt_influx_consumer
-        mqtt_influx_consumer.stop()
+        if mqtt_influx_consumer.is_running:
+            mqtt_influx_consumer.stop()
     except Exception:
         pass
 

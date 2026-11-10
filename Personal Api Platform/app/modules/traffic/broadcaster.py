@@ -8,6 +8,8 @@ import asyncio
 from collections import deque
 import json
 import logging
+import os
+import threading
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, Set
 from fastapi import WebSocket
@@ -91,12 +93,38 @@ class TrafficBroadcaster:
 
         self._history.append(event)
 
+        # If running as decoupled worker, forward live event via HTTP to central gateway
+        role = os.getenv("ROLE", "api").lower()
+        pap_api_url = os.getenv("PAP_API_URL")
+        if role == "worker" and pap_api_url:
+            self._forward_to_gateway(pap_api_url, event)
+
         # Dispatch async broadcast safely
         try:
             loop = asyncio.get_running_loop()
             loop.create_task(self._broadcast(event))
         except RuntimeError:
             pass
+
+    def _forward_to_gateway(self, pap_api_url: str, event: Dict[str, Any]):
+        """Forwards event to central API gateway in a background daemon thread."""
+        def _send():
+            try:
+                import urllib.request
+                url = f"{pap_api_url.rstrip('/')}/api/v1/traffic/event"
+                payload = json.dumps(event).encode("utf-8")
+                req = urllib.request.Request(
+                    url,
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=1.0) as resp:
+                    pass
+            except Exception:
+                pass
+
+        threading.Thread(target=_send, daemon=True).start()
 
     def _classify_source(self, client_ip: str, path: str) -> str:
         if "192.168.25.104" in client_ip or path.startswith("/api/nfc") or "/devices" in path:
