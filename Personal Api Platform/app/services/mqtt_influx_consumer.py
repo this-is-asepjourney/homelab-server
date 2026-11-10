@@ -36,6 +36,7 @@ class MqttInfluxConsumer:
         self.messages_count = 0
         self.last_message_at = None
         self.last_topic = None
+        self.devices_last_seen: Dict[str, float] = {}
 
         self.topics = [
             ("/SysCtrl", 0),
@@ -164,6 +165,7 @@ class MqttInfluxConsumer:
             "messages_count": self.messages_count,
             "last_message_at": self.last_message_at,
             "last_topic": self.last_topic,
+            "devices_last_seen": self.devices_last_seen,
         }
 
     def _process_payload(self, topic: str, data: Dict[str, Any]):
@@ -175,6 +177,7 @@ class MqttInfluxConsumer:
             or data.get("mcid")
             or "ETL-ESP32-001"
         )
+        self.devices_last_seen[str(device_serial)] = time.time()
         device_name = data.get("device") or data.get("nama") or "Eternal"
         model = data.get("model") or data.get("IOT_MODEL") or "Eternal-ESP32"
 
@@ -200,6 +203,22 @@ class MqttInfluxConsumer:
                     status=status
                 )
                 logger.info(f"[MQTT->InfluxDB] Recorded NFC event for {user_name} ({uid}) -> InfluxDB")
+
+                # Sync to MySQL nfc_access_logs and update nfc_users tap counter
+                try:
+                    from app.modules.iot.nfc_service import NfcService
+                    NfcService.record_tap({
+                        "uid": uid,
+                        "nama": user_name,
+                        "username": username,
+                        "role": role,
+                        "action_type": action,
+                        "lock_duration_sec": duration,
+                        "device_serial": str(device_serial),
+                        "device_ip": str(data.get("ip") or "192.168.25.104")
+                    })
+                except Exception as e:
+                    logger.debug(f"[MQTT->MySQL NFC Tap] Note: {e}")
 
                 # Broadcast live event to Architecture Map
                 try:

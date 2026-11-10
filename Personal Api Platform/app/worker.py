@@ -72,12 +72,18 @@ class PapWorker:
 
         # IoT Fleet watchdog tracking
         self.device_last_seen: Dict[str, float] = {}
+        self.device_offline_states: Dict[str, bool] = {}
+        self.last_nfc_sync_time: float = 0.0
+        self.last_maintenance_time: float = 0.0
 
     def start(self):
         logger.info("==================================================")
         logger.info(f"Starting {self.worker_id} (PAP Decoupled Worker Engine)")
         logger.info(f"Connected Gateway: {self.gateway_url}")
         logger.info(f"Auto-Backup Enabled: {self.enable_auto_backup} (every {self.backup_interval_sec // 3600}h, retention {self.backup_retention_days}d)")
+        logger.info("IoT Fleet Watchdog: Active (90s dead-man timeout)")
+        logger.info("NFC Whitelist Relay: Active (every 5m sync to MQTT)")
+        logger.info("Database Retention Maintenance: Active (every 6h prune >14d)")
         logger.info("==================================================")
 
         # 1. Start MQTT -> InfluxDB Consumer
@@ -107,6 +113,16 @@ class PapWorker:
             if now - last_watchdog_time >= 30.0:
                 self._check_fleet_watchdog()
                 last_watchdog_time = now
+
+            # NFC Whitelist sync to MQTT (every 300s / 5m)
+            if now - self.last_nfc_sync_time >= 300.0:
+                self._sync_nfc_whitelist_to_mqtt()
+                self.last_nfc_sync_time = now
+
+            # Database maintenance & log pruning (every 6 hours)
+            if now - self.last_maintenance_time >= 21600.0:
+                self._run_database_maintenance()
+                self.last_maintenance_time = now
 
             stop_event.wait(timeout=1.0)
 
@@ -186,17 +202,167 @@ class PapWorker:
 
     def _check_fleet_watchdog(self):
         """Monitors fleet machine activity for silence (Dead Man's Snitch)."""
-        # Read latest message timestamp from consumer
         mqtt_status = mqtt_influx_consumer.get_status()
-        last_msg = mqtt_status.get("last_message_at")
-        if last_msg:
-            # Mark active
-            pass
+        devices = mqtt_status.get("devices_last_seen", {})
+        now = time.time()
+
+        # If no messages seen in session yet, also check MySQL devices
+        if not devices:
+            try:
+                from app.modules.iot.nfc_service import get_eternal_mysql_conn
+                conn = get_eternal_mysql_conn()
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT device_serial, status, UNIX_TIMESTAMP(last_seen_at) FROM iot_devices;")
+                        rows = cur.fetchall() or []
+                        for r in rows:
+                            s = r.get("device_serial")
+                            ts = r.get("UNIX_TIMESTAMP(last_seen_at)")
+                            if s and ts:
+                                devices[s] = float(ts)
+                finally:
+                    conn.close()
+            except Exception:
+                pass
+
+        for serial, last_seen in list(devices.items()):
+            idle_sec = now - last_seen
+            is_idle = idle_sec > 90.0  # 90 seconds without packet
+
+            was_offline = self.device_offline_states.get(serial, False)
+            if is_idle and not was_offline:
+                self.device_offline_states[serial] = True
+                logger.warning(f"[Fleet Watchdog] Machine {serial} silent for {int(idle_sec)}s. Marking OFFLINE.")
+                self._update_device_status_in_db(serial, "offline")
+                self._post_traffic_event(
+                    method="WATCHDOG",
+                    path=f"/iot/devices/{serial}/status",
+                    status=504,
+                    source="worker",
+                    target="core",
+                    sub_target="mysql",
+                    tag="FLEET_OFFLINE",
+                    color="#ef4444",
+                    detail=f"Watchdog alert: {serial} is silent ({int(idle_sec)}s without telemetry)"
+                )
+            elif not is_idle and was_offline:
+                self.device_offline_states[serial] = False
+                logger.info(f"[Fleet Watchdog] Machine {serial} active again ({int(idle_sec)}s). Marking ONLINE.")
+                self._update_device_status_in_db(serial, "online")
+                self._post_traffic_event(
+                    method="WATCHDOG",
+                    path=f"/iot/devices/{serial}/status",
+                    status=200,
+                    source="worker",
+                    target="core",
+                    sub_target="mysql",
+                    tag="FLEET_ONLINE",
+                    color="#10b981",
+                    detail=f"Watchdog recovery: {serial} resumed telemetry"
+                )
+
+    def _update_device_status_in_db(self, serial: str, status: str):
+        try:
+            from app.modules.iot.nfc_service import get_eternal_mysql_conn
+            conn = get_eternal_mysql_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE iot_devices SET status = %s WHERE device_serial = %s;",
+                        (status, serial)
+                    )
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug(f"[Worker DB Update] Error updating {serial} to {status}: {e}")
+
+    def _sync_nfc_whitelist_to_mqtt(self):
+        """Periodically broadcasts verified NFC UID whitelist to MQTT broker for offline resiliency."""
+        try:
+            from app.modules.iot.nfc_service import NfcService
+            users = NfcService.list_users()
+            active_uids = [u.get("uid") for u in users if u.get("is_active", 1) and u.get("uid")]
+            if active_uids and mqtt_influx_consumer.client and mqtt_influx_consumer.connected:
+                payload = {
+                    "event": "users_sync",
+                    "count": len(active_uids),
+                    "uids": active_uids,
+                    "timestamp": int(time.time()),
+                    "synced_by": self.worker_id,
+                }
+                mqtt_influx_consumer.client.publish(
+                    "Eternal/users/sync",
+                    json.dumps(payload),
+                    qos=1,
+                    retain=True
+                )
+                logger.info(f"[Worker NFC Sync] Synced {len(active_uids)} active NFC cards to MQTT 'Eternal/users/sync'")
+        except Exception as e:
+            logger.debug(f"[Worker NFC Sync] Note: {e}")
+
+    def _run_database_maintenance(self):
+        """Prunes old telemetry logs in MySQL older than 14 days (InfluxDB handles long-term TSDB)."""
+        try:
+            from app.modules.iot.nfc_service import get_eternal_mysql_conn
+            conn = get_eternal_mysql_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM iot_telemetry_logs WHERE recorded_at < NOW() - INTERVAL 14 DAY;")
+                    deleted = cur.rowcount
+                    if deleted > 0:
+                        logger.info(f"[Worker Maintenance] Pruned {deleted} old raw rows from iot_telemetry_logs (>14d)")
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug(f"[Worker Maintenance] Note: {e}")
+
+    def _check_databases_health(self) -> Dict[str, str]:
+        """Runs fast connectivity checks across Postgres, MySQL, and InfluxDB."""
+        results = {}
+        # 1. MySQL
+        try:
+            from app.modules.iot.nfc_service import get_eternal_mysql_conn
+            c = get_eternal_mysql_conn()
+            c.close()
+            results["mysql"] = "healthy"
+        except Exception as e:
+            results["mysql"] = f"unhealthy: {e}"
+
+        # 2. InfluxDB
+        try:
+            from app.services.influxdb_service import influx_service
+            results["influxdb"] = "healthy" if influx_service.is_healthy() else "degraded"
+        except Exception:
+            results["influxdb"] = "unreachable"
+
+        # 3. PostgreSQL
+        try:
+            import psycopg2
+            pg_conn = psycopg2.connect(
+                host=os.getenv("POSTGRES_HOST", "192.168.25.101"),
+                port=int(os.getenv("POSTGRES_PORT", 5432)),
+                dbname=os.getenv("POSTGRES_DB", "psm"),
+                user=os.getenv("POSTGRES_USER", "appuser"),
+                password=os.getenv("POSTGRES_PASSWORD", "admin12345"),
+                connect_timeout=3
+            )
+            pg_conn.close()
+            results["postgres"] = "healthy"
+        except Exception:
+            results["postgres"] = "unreachable"
+
+        return results
 
     def _send_heartbeat(self):
         """Sends periodic operational status to central gateway."""
         try:
             mqtt_status = mqtt_influx_consumer.get_status()
+            devices_monitored = max(len(mqtt_status.get("devices_last_seen", {})), 1)
+            devices_offline_count = sum(1 for v in self.device_offline_states.values() if v)
+            devices_online = max(devices_monitored - devices_offline_count, 0)
+
+            db_health = self._check_databases_health()
+
             payload = {
                 "worker_id": self.worker_id,
                 "uptime_sec": int(time.time() - self.start_time),
@@ -208,6 +374,10 @@ class PapWorker:
                 "last_backup_at": datetime.fromtimestamp(self.last_backup_time, timezone.utc).isoformat() if self.last_backup_time else None,
                 "active_monitors": 4,
                 "memory_rss_mb": _get_process_rss_mb(),
+                "devices_online": devices_online,
+                "devices_monitored": devices_monitored,
+                "databases_health": db_health,
+                "last_maintenance_at": datetime.fromtimestamp(self.last_maintenance_time, timezone.utc).isoformat() if self.last_maintenance_time else None,
             }
 
             url = f"{self.gateway_url}/api/v1/system/worker-heartbeat"

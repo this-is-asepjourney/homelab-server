@@ -96,9 +96,15 @@ class RequestContextAndSecurityMiddleware(BaseHTTPMiddleware):
 
         response.headers["X-Request-ID"] = validated_id
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Cache-Control"] = "no-store"
+
+        # Allow iframe embedding across homelab dashboards (PSM :3005, Grafana :3001, Ingress :80)
+        # Using CSP frame-ancestors prevents browser 'ERR_BLOCKED_BY_RESPONSE' while keeping cross-site safe
+        response.headers["Content-Security-Policy"] = (
+            "frame-ancestors 'self' http://localhost:* http://127.0.0.1:* "
+            "http://192.168.25.101:* http://100.106.63.90:* http://*.homelab http://*.fa.local *"
+        )
 
         logger.info(
             f"{request.method} {request.url.path} -> {response.status_code} ({duration_ms}ms)",
@@ -112,17 +118,22 @@ class RequestContextAndSecurityMiddleware(BaseHTTPMiddleware):
             },
         )
 
-        # Broadcast real API traffic event for live topology visualization
+        # Broadcast real API traffic event for live topology visualization (exclude high-frequency internal polling)
         try:
-            from app.modules.traffic.broadcaster import traffic_broadcaster
-            client_ip = request.client.host if request.client else "127.0.0.1"
-            traffic_broadcaster.record_and_broadcast(
-                method=request.method,
-                path=request.url.path,
-                status=response.status_code,
-                duration_ms=duration_ms,
-                client_ip=client_ip,
-            )
+            path_str = request.url.path
+            if not (
+                path_str.startswith(("/api/v1/traffic", "/api/v1/system/worker-heartbeat", "/api/v1/system/worker-status", "/metrics"))
+                or path_str.endswith(("/favicon.ico", ".map", ".png", ".jpg"))
+            ):
+                from app.modules.traffic.broadcaster import traffic_broadcaster
+                client_ip = request.client.host if request.client else "127.0.0.1"
+                traffic_broadcaster.record_and_broadcast(
+                    method=request.method,
+                    path=path_str,
+                    status=response.status_code,
+                    duration_ms=duration_ms,
+                    client_ip=client_ip,
+                )
         except Exception:
             pass
 

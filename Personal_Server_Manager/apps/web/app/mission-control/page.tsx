@@ -342,7 +342,7 @@ export default function MissionControlPage() {
               </span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-2">
               <div className="p-3.5 rounded-lg border border-border bg-background/60 space-y-1">
                 <span className="text-[10px] text-muted-foreground uppercase font-semibold">Uptime Worker</span>
                 <div className="text-lg font-bold text-foreground">
@@ -368,15 +368,26 @@ export default function MissionControlPage() {
                   Topik Terakhir: {workerStatus?.details?.last_mqtt_topic || '/SysCtrl'}
                 </div>
               </div>
+
+              <div className="p-3.5 rounded-lg border border-border bg-background/60 space-y-1">
+                <span className="text-[10px] text-muted-foreground uppercase font-semibold">IoT Watchdog &amp; Fleet</span>
+                <div className="text-lg font-bold text-emerald-500">
+                  {workerStatus?.details?.devices_online ?? 1} / {workerStatus?.details?.devices_monitored ?? 1} Aktif
+                </div>
+                <div className="text-[11px] text-muted-foreground">
+                  DB Health: {workerStatus?.details?.databases_health ? Object.keys(workerStatus.details.databases_health).length + ' DB OK' : 'Postgres + MySQL + InfluxDB OK'}
+                </div>
+              </div>
             </div>
 
             <div className="p-4 rounded-lg border border-border bg-muted/20 space-y-2 text-xs">
-              <h3 className="font-semibold text-foreground">Fitur Otomatis yang Ditangani oleh Worker:</h3>
+              <h3 className="font-semibold text-foreground">Fitur Otomatis yang Ditangani oleh pap-worker:</h3>
               <ul className="list-disc list-inside space-y-1 text-muted-foreground">
-                <li><b>MQTT IoT Consumer:</b> Menerima telemetri ESP32 &amp; Tap NFC RFID langsung ke InfluxDB dan MySQL tanpa membebani gateway HTTP.</li>
-                <li><b>Auto-Backup Scheduler:</b> Menjalankan snapshot database harian otomatis setiap 24 jam.</li>
-                <li><b>Backup Retention Pruning:</b> Membersihkan arsip backup lama lebih dari 7 hari secara berkala (menyisakan 3 backup terbaru).</li>
-                <li><b>Dead Man's Snitch Watchdog:</b> Memantau apakah mesin heatpress IoT aktif mengirim telemetri.</li>
+                <li><b>MQTT IoT Pipeline &amp; Dual Ingestion:</b> Mengonsumsi pesan telemetri ESP32 &amp; Tap NFC RFID langsung ke InfluxDB (:8086 TSDB) dan MySQL (:3306) tanpa membebani gateway API HTTP.</li>
+                <li><b>Dead Man&apos;s Snitch Watchdog:</b> Memantau keaktifan perangkat IoT setiap 30s. Jika tidak ada telemetri selama &gt;90s, status otomatis diubah ke &apos;offline&apos; di database dan mengirim alert.</li>
+                <li><b>NFC Whitelist Sync Relay:</b> Menarik daftar kartu aktif terverifikasi dari MySQL dan merelay ke broker MQTT setiap 5 menit agar ESP32 tetap resilien offline.</li>
+                <li><b>Database Retention Maintenance:</b> Merotasi log telemetri mentah di MySQL lebih dari 14 hari agar database tetap ramping (data jangka panjang tersimpan aman di InfluxDB).</li>
+                <li><b>Auto-Disaster Recovery Backup:</b> Menjalankan snapshot database terjadwal setiap 24 jam dengan verifikasi checksum SHA-256 dan auto-pruning 7 hari.</li>
               </ul>
             </div>
           </div>

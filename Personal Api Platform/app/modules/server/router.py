@@ -28,6 +28,13 @@ class WorkerHeartbeatPayload(BaseModel):
     last_backup_at: Optional[str] = None
     active_monitors: int = 0
     memory_rss_mb: float = 0.0
+    devices_online: int = 0
+    devices_monitored: int = 0
+    databases_health: Optional[Dict[str, str]] = None
+    last_maintenance_at: Optional[str] = None
+
+    class Config:
+        extra = "allow"
 
 
 @router.get("/health")
