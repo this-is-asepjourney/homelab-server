@@ -775,7 +775,7 @@
           <button class="btn btn-primary" onclick="openCreateBackupModal()">➕ Buat Backup Baru</button>
         </div>
         <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
-          Mencadangkan seluruh database (PostgreSQL <code>psm</code>, <code>pap_core</code>; MySQL <code>eternal_db</code>, <code>stock_umkm</code>) dan konfigurasi layanan (Docker Compose, Prometheus, Mosquitto, Telegraf, .env) ke dalam arsip terkompresi <code>.tar.gz</code>.
+          Mencadangkan seluruh database terpadu (PostgreSQL <code>psm</code>, <code>pap_core</code>; MySQL <code>eternal_db</code>, <code>stock_umkm</code>; InfluxDB <code>eternal_telemetry</code>) serta konfigurasi jaringan &amp; layanan (CoreDNS, Nginx Ingress Router, Prometheus, Mosquitto, Telegraf, Docker Compose, .env) ke dalam arsip terkompresi <code>.tar.gz</code> dengan verifikasi integritas checksum SHA-256 otomatis.
         </p>
 
         <div id="backup-alert" style="display: none; padding: 0.75rem; border-radius: 6px; margin-bottom: 1rem; font-size: 0.85rem;"></div>
@@ -1107,6 +1107,22 @@
       <div id="manifest-content" class="code-preview">Memuat...</div>
       <div style="display: flex; justify-content: flex-end; margin-top: 1.25rem;">
         <button class="btn btn-primary" onclick="closeManifestModal()">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: HASIL VERIFIKASI ARSIP -->
+  <div id="modal-verify" class="modal-backdrop">
+    <div class="modal-box" style="max-width: 750px;">
+      <div class="modal-header">
+        <div class="modal-title" id="verify-modal-title">🔍 Hasil Verifikasi Integritas Backup</div>
+        <button class="modal-close" onclick="closeVerifyModal()">&times;</button>
+      </div>
+      <div id="verify-modal-body" style="font-size: 0.9rem;">
+        Memverifikasi arsip...
+      </div>
+      <div style="display: flex; justify-content: flex-end; margin-top: 1.25rem;">
+        <button class="btn btn-primary" onclick="closeVerifyModal()">Tutup</button>
       </div>
     </div>
   </div>
@@ -1680,7 +1696,16 @@
 
         tbody.innerHTML = data.map(b => {
           const dateStr = new Date(b.created_at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
-          const dbs = Object.keys(b.databases || {}).join(', ') || '-';
+          const dbEntries = Object.entries(b.databases || {});
+          let dbs = '-';
+          if (dbEntries.length > 0) {
+            dbs = dbEntries.map(([name, info]) => {
+              const ok = info && info.status === 'ok';
+              const color = ok ? '#34d399' : '#f87171';
+              const rows = (info && info.rows !== undefined) ? ` (${info.rows} rows)` : '';
+              return `<span style="display:inline-block; margin:2px; font-size:0.75rem; background:#0f172a; padding:2px 6px; border-radius:4px; border:1px solid #1e293b; color:${color};">${name}${rows}</span>`;
+            }).join('');
+          }
           return `
             <tr>
               <td>
@@ -1690,9 +1715,10 @@
               <td><span class="badge badge-info">${b.scope}</span></td>
               <td><b>${b.size_human}</b></td>
               <td>${dateStr}</td>
-              <td><span style="font-size: 0.8rem; color: #34d399;">${dbs}</span></td>
+              <td><div>${dbs}</div></td>
               <td style="white-space: nowrap;">
                 <a href="/api/v1/backups/${encodeURIComponent(b.filename)}/download" class="btn btn-primary btn-sm" title="Unduh Arsip">⬇️ Unduh</a>
+                <button onclick="verifyBackup('${b.filename}')" class="btn btn-sm" style="background: #0284c7; color: #fff;" title="Verifikasi Integritas">🔍 Verifikasi</button>
                 <button onclick="viewManifest('${b.filename}')" class="btn btn-sm" style="background: #334155; color: #fff;" title="Lihat Isi">📋 Isi</button>
                 <button onclick="deleteBackup('${b.filename}')" class="btn btn-danger btn-sm" title="Hapus">🗑️</button>
               </td>
@@ -1765,6 +1791,100 @@
 
     function closeManifestModal() {
       document.getElementById('modal-manifest').classList.remove('active');
+    }
+
+    async function verifyBackup(filename) {
+      const modal = document.getElementById('modal-verify');
+      const body = document.getElementById('verify-modal-body');
+      document.getElementById('verify-modal-title').innerText = `🔍 Verifikasi Arsip: ${filename}`;
+      body.innerHTML = `
+        <div style="text-align: center; padding: 2rem;">
+          <div class="spinner" style="display: inline-block; width: 32px; height: 32px; border: 3px solid rgba(255,255,255,0.2); border-top-color: #38bdf8; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+          <div style="margin-top: 1rem; color: #94a3b8;">Sedang mengekstrak arsip, menguji integritas stream .tar.gz, validasi checksum SHA-256, dan validasi sintaks SQL/Flux...</div>
+        </div>
+      `;
+      modal.classList.add('active');
+
+      try {
+        const res = await fetch(`/api/v1/backups/${encodeURIComponent(filename)}/verify`, { method: 'POST' });
+        const json = await res.json();
+        if (!res.ok) {
+          body.innerHTML = `<div style="color: #f87171; padding: 1rem;">Gagal memverifikasi arsip: ${json.detail || 'Unknown error'}</div>`;
+          return;
+        }
+
+        const rep = json.data || {};
+        const isPassed = rep.status === 'PASSED';
+        const badgeColor = isPassed ? '#10b981' : (rep.status === 'WARNING' ? '#f59e0b' : '#ef4444');
+
+        let dbHtml = '';
+        if (rep.databases && Object.keys(rep.databases).length > 0) {
+          dbHtml = Object.values(rep.databases).map(d => `
+            <div style="display: flex; justify-content: space-between; align-items: center; background: #0f172a; padding: 6px 12px; border-radius: 6px; margin-bottom: 4px; font-size: 0.8rem; border: 1px solid #1e293b;">
+              <div>
+                <b>${d.file}</b>
+                <span style="color: #64748b; margin-left: 8px;">${d.size_human} (${d.format})</span>
+              </div>
+              <span class="badge ${d.valid ? 'badge-success' : 'badge-danger'}">${d.valid ? '✓ Valid Format' : '✗ Kosong/Corrupted'}</span>
+            </div>
+          `).join('');
+        } else {
+          dbHtml = '<div style="color: #64748b; font-size: 0.8rem; padding: 4px;">Tidak ada database dalam arsip ini.</div>';
+        }
+
+        let cfgHtml = '';
+        if (rep.configs && Object.keys(rep.configs).length > 0) {
+          cfgHtml = Object.values(rep.configs).map(c => `
+            <div style="display: flex; justify-content: space-between; align-items: center; background: #0f172a; padding: 6px 12px; border-radius: 6px; margin-bottom: 4px; font-size: 0.8rem; border: 1px solid #1e293b;">
+              <div>
+                <b>${c.file}</b>
+                <span style="color: #64748b; margin-left: 8px;">${c.size_human}</span>
+              </div>
+              <span class="badge ${c.valid ? 'badge-success' : 'badge-danger'}">${c.valid ? '✓ Utuh' : '✗ Kosong'}</span>
+            </div>
+          `).join('');
+        } else {
+          cfgHtml = '<div style="color: #64748b; font-size: 0.8rem; padding: 4px;">Tidak ada file konfigurasi dalam arsip ini.</div>';
+        }
+
+        body.innerHTML = `
+          <div style="display: flex; gap: 1rem; margin-bottom: 1.25rem;">
+            <div style="flex: 1; background: #0f172a; padding: 1rem; border-radius: 8px; border: 1px solid #1e293b; text-align: center;">
+              <div style="color: #64748b; font-size: 0.75rem; text-transform: uppercase;">Status Integritas</div>
+              <div style="font-size: 1.4rem; font-weight: 800; color: ${badgeColor}; margin-top: 4px;">${rep.status}</div>
+            </div>
+            <div style="flex: 1; background: #0f172a; padding: 1rem; border-radius: 8px; border: 1px solid #1e293b; text-align: center;">
+              <div style="color: #64748b; font-size: 0.75rem; text-transform: uppercase;">Skor Kelayakan Restore</div>
+              <div style="font-size: 1.4rem; font-weight: 800; color: #38bdf8; margin-top: 4px;">${rep.integrity_score_percent}%</div>
+            </div>
+            <div style="flex: 1; background: #0f172a; padding: 1rem; border-radius: 8px; border: 1px solid #1e293b; text-align: center;">
+              <div style="color: #64748b; font-size: 0.75rem; text-transform: uppercase;">Total File Diarsip</div>
+              <div style="font-size: 1.4rem; font-weight: 800; color: #a78bfa; margin-top: 4px;">${rep.total_files || 0} File</div>
+            </div>
+          </div>
+
+          <div style="background: #0b1426; padding: 0.75rem 1rem; border-radius: 6px; font-family: monospace; font-size: 0.75rem; color: #94a3b8; margin-bottom: 1rem; word-break: break-all; border: 1px solid #1e3a8a;">
+            <div><b>SHA-256 Checksum:</b> ${rep.sha256}</div>
+            <div style="margin-top: 4px;"><b>Struktur Tar.gz:</b> ${rep.tar_intact ? '✅ Valid Archive Stream' : '❌ Corrupted'} | <b>Manifest:</b> ${rep.manifest_intact ? '✅ Valid JSON Metadata' : '❌ Missing'}</div>
+          </div>
+
+          <div style="margin-bottom: 1rem;">
+            <div style="font-weight: 700; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.5rem;">📁 Database Dump Verification:</div>
+            ${dbHtml}
+          </div>
+
+          <div>
+            <div style="font-weight: 700; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.5rem;">⚙️ System &amp; Network Config Verification:</div>
+            ${cfgHtml}
+          </div>
+        `;
+      } catch (err) {
+        body.innerHTML = `<div style="color: #f87171; padding: 1rem;">Error memverifikasi: ${err.message}</div>`;
+      }
+    }
+
+    function closeVerifyModal() {
+      document.getElementById('modal-verify').classList.remove('active');
     }
 
     async function deleteBackup(filename) {

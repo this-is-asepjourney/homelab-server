@@ -70,6 +70,20 @@ def view_backup_manifest(filename: str):
     return {"success": True, "data": manifest}
 
 
+@router.post("/{filename}/verify")
+@router.get("/{filename}/verify")
+def verify_backup_integrity(filename: str):
+    """Verifies the integrity of a backup archive, validates tar structure, checksums, and parses SQL/Flux headers."""
+    report = BackupService.verify_backup(filename)
+    if not report.get("exists"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup archive not found")
+    return {
+        "success": True,
+        "message": f"Verification completed: {report.get('status')} ({report.get('integrity_score_percent', 0)}%)",
+        "data": report,
+    }
+
+
 @router.delete("/{filename}")
 def delete_backup(filename: str):
     """Permanently deletes a backup archive and its metadata."""

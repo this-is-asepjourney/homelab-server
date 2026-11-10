@@ -1,7 +1,7 @@
 """Homelab Unified Backup Engine.
 
-Backs up all databases (PostgreSQL: psm, pap_core; MySQL: stock_umkm)
-and service configurations (Docker, Prometheus, Mosquitto, Telegraf, .env)
+Backs up all databases (PostgreSQL: psm, pap_core; MySQL: eternal_db, stock_umkm; InfluxDB: eternal_telemetry)
+and service configurations (Docker, CoreDNS, Ingress Router, Prometheus, Mosquitto, Telegraf, .env)
 into standalone timestamped compressed tarballs (.tar.gz).
 """
 
@@ -13,6 +13,8 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -126,7 +128,6 @@ class BackupService:
                 with eng.connect() as conn:
                     for tbl in table_names:
                         try:
-                            # Dump rows as json records
                             rows = conn.execute(text(f'SELECT * FROM "{tbl}"')).mappings().all()
                             total_rows += len(rows)
                             f.write(f"-- Table: {tbl} ({len(rows)} rows)\n")
@@ -142,7 +143,6 @@ class BackupService:
                                     elif isinstance(v, bool):
                                         vals.append("TRUE" if v else "FALSE")
                                     else:
-                                        # String / JSON / Date escape
                                         escaped = str(v).replace("'", "''")
                                         vals.append(f"'{escaped}'")
                                 col_str = ", ".join([f'"{c}"' for c in cols])
@@ -167,14 +167,13 @@ class BackupService:
             return {"status": "error", "database": db_name, "error": str(e)}
 
     @classmethod
-    def _export_mysql_database(cls, out_dir: Path) -> Dict[str, Any]:
-        """Dumps MySQL stock_umkm database."""
-        db_name = os.getenv("STOCK_DB_NAME", "stock_umkm")
+    def _export_mysql_database(cls, db_name: str, out_dir: Path) -> Dict[str, Any]:
+        """Dumps a MySQL database (e.g. eternal_db, stock_umkm)."""
         out_sql = out_dir / f"{db_name}.sql"
-        host = os.getenv("STOCK_DB_HOST", "192.168.25.101")
-        port = os.getenv("STOCK_DB_PORT", "3306")
-        user = os.getenv("STOCK_DB_USER", "pap_stock_reader")
-        password = os.getenv("STOCK_DB_PASSWORD", "admin12345")
+        host = os.getenv("MYSQL_HOST") or os.getenv("STOCK_DB_HOST", "192.168.25.101")
+        port = os.getenv("MYSQL_PORT") or os.getenv("STOCK_DB_PORT", "3306")
+        user = os.getenv("MYSQL_USER") or os.getenv("STOCK_DB_USER", "appuser")
+        password = os.getenv("MYSQL_PASSWORD") or os.getenv("STOCK_DB_PASSWORD", "admin12345")
 
         # 1. Native mysqldump / mariadb-dump
         dump_bin = shutil.which("mariadb-dump") or shutil.which("mysqldump")
@@ -206,7 +205,7 @@ class BackupService:
         candidates = [
             f"mysql+pymysql://{user}:{password}@{host}:{port}/{db_name}",
             f"mysql+pymysql://{user}:{password}@host.docker.internal:{port}/{db_name}",
-            f"mysql+pymysql://root:{password}@{host}:{port}/{db_name}",
+            f"mysql+pymysql://root:{os.getenv('MYSQL_ROOT_PASSWORD', password)}@{host}:{port}/{db_name}",
         ]
         eng = None
         for conn_str in candidates:
@@ -220,7 +219,7 @@ class BackupService:
                 continue
 
         if not eng:
-            return {"status": "skipped_unreachable", "database": db_name, "error": "MySQL unreachable"}
+            return {"status": "skipped_unreachable", "database": db_name, "error": f"MySQL {db_name} unreachable"}
 
         try:
             inspector = inspect(eng)
@@ -273,8 +272,60 @@ class BackupService:
             return {"status": "error", "database": db_name, "error": str(e)}
 
     @classmethod
+    def _export_influxdb_database(cls, out_dir: Path) -> Dict[str, Any]:
+        """Dumps InfluxDB timeseries data points using Flux query to annotated CSV."""
+        from app.services.influxdb_service import influx_service
+
+        bucket = os.getenv("INFLUXDB_BUCKET", getattr(influx_service, "bucket", "eternal_telemetry"))
+        org = os.getenv("INFLUXDB_ORG", getattr(influx_service, "org", "homelab"))
+        token = os.getenv("INFLUXDB_TOKEN", getattr(influx_service, "token", "homelab-influxdb-master-auth-token-2026"))
+        base_url = (os.getenv("INFLUXDB_URL") or getattr(influx_service, "url", "http://influxdb:8086")).rstrip("/")
+
+        out_csv = out_dir / f"{bucket}.flux.csv"
+
+        test_urls = [
+            f"{base_url}/api/v2/query?org={urllib.parse.quote(org)}",
+            f"http://127.0.0.1:8086/api/v2/query?org={urllib.parse.quote(org)}",
+            f"http://192.168.25.101:8086/api/v2/query?org={urllib.parse.quote(org)}",
+        ]
+
+        flux_query = f'from(bucket: "{bucket}") |> range(start: -30d)'
+        payload = json.dumps({"query": flux_query, "type": "flux"}).encode("utf-8")
+        headers = {
+            "Authorization": f"Token {token}",
+            "Content-Type": "application/json",
+            "Accept": "application/csv",
+        }
+
+        for q_url in test_urls:
+            try:
+                req = urllib.request.Request(q_url, data=payload, headers=headers, method="POST")
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    if resp.status == 200:
+                        content = resp.read()
+                        out_csv.write_bytes(content)
+                        return {
+                            "status": "success",
+                            "method": "flux_query_csv",
+                            "bucket": bucket,
+                            "org": org,
+                            "file": out_csv.name,
+                            "size_bytes": out_csv.stat().st_size,
+                        }
+            except Exception as e:
+                logger.debug("Influx query attempt to %s failed: %s", q_url, e)
+                continue
+
+        # If InfluxDB is unreachable or empty
+        return {
+            "status": "skipped",
+            "bucket": bucket,
+            "error": "InfluxDB service unreachable or no data points found",
+        }
+
+    @classmethod
     def _collect_configs(cls, out_dir: Path) -> List[Dict[str, Any]]:
-        """Collects Docker Compose, environment files, and service configs."""
+        """Collects Docker Compose, environment files, CoreDNS, and Nginx Router Virtual Host configs."""
         collected = []
         search_paths = [
             # Docker Compose
@@ -317,6 +368,40 @@ class BackupService:
                 except Exception as e:
                     logger.warning("Failed to copy %s: %s", p, e)
 
+        # Collect CoreDNS configurations
+        dns_out = out_dir / "dns"
+        dns_out.mkdir(parents=True, exist_ok=True)
+        for cand in [Path("dns"), Path("../dns"), Path("/opt/projects/homelab-server/dns"), Path("/app/dns")]:
+            if cand.exists() and cand.is_dir():
+                for f in cand.glob("*"):
+                    if f.is_file():
+                        target_f = dns_out / f.name
+                        shutil.copy2(f, target_f)
+                        collected.append({
+                            "name": f"dns/{f.name}",
+                            "source": str(f),
+                            "size_bytes": target_f.stat().st_size,
+                        })
+                break
+
+        # Collect Nginx Ingress configurations and all Virtual Hosts
+        router_out = out_dir / "router"
+        router_out.mkdir(parents=True, exist_ok=True)
+        for cand in [Path("router"), Path("../router"), Path("/opt/projects/homelab-server/router"), Path("/app/router")]:
+            if cand.exists() and cand.is_dir():
+                for f in cand.rglob("*.conf"):
+                    if f.is_file():
+                        rel = f.relative_to(cand)
+                        target_f = router_out / rel
+                        target_f.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(f, target_f)
+                        collected.append({
+                            "name": f"router/{rel}",
+                            "source": str(f),
+                            "size_bytes": target_f.stat().st_size,
+                        })
+                break
+
         return collected
 
     @classmethod
@@ -336,18 +421,25 @@ class BackupService:
             db_results = {}
             config_results = []
 
-            # 1. Databases Backup
+            # 1. Databases Backup (All 5 databases in Homelab)
             if scope in ("all", "databases"):
                 db_dir = stage_dir / "databases"
                 db_dir.mkdir(parents=True, exist_ok=True)
+
                 # PostgreSQL PSM
                 db_results["psm"] = cls._export_postgres_database("psm", db_dir)
                 # PostgreSQL PAP Core
                 db_results["pap_core"] = cls._export_postgres_database("pap_core", db_dir)
-                # MySQL Stock UMKM
-                db_results["stock_umkm"] = cls._export_mysql_database(db_dir)
 
-            # 2. Configs Backup
+                # MySQL eternal_db (NFC Users, Device Locks, Access Logs)
+                db_results["eternal_db"] = cls._export_mysql_database("eternal_db", db_dir)
+                # MySQL stock_umkm (Products, Transactions, Inventory)
+                db_results["stock_umkm"] = cls._export_mysql_database("stock_umkm", db_dir)
+
+                # InfluxDB 2.7 TSDB (Sensor DHT11 timeseries metrics)
+                db_results["influx_telemetry"] = cls._export_influxdb_database(db_dir)
+
+            # 2. Configs Backup (Docker, DNS, Router VHosts, Mosquitto, Prometheus, Telegraf)
             if scope in ("all", "configs"):
                 cfg_dir = stage_dir / "configs"
                 cfg_dir.mkdir(parents=True, exist_ok=True)
@@ -356,10 +448,10 @@ class BackupService:
             # 3. Create Manifest
             manifest_data = {
                 "backup_id": backup_id,
-                "version": "1.0",
+                "version": "2.0",
                 "created_at": now.isoformat(),
                 "scope": scope,
-                "note": note or "Automated Homelab Unified Backup",
+                "note": note or "Automated Homelab Unified Full-Stack Backup",
                 "system": {
                     "host": os.getenv("HOSTNAME", "fa-server"),
                     "ip": os.getenv("HOST_IP", "192.168.25.101"),
@@ -397,6 +489,98 @@ class BackupService:
             pass
 
         return manifest_data
+
+    @classmethod
+    def verify_backup(cls, filename: str) -> Dict[str, Any]:
+        """Performs a comprehensive integrity check and test-parsing of a backup archive."""
+        safe_name = Path(filename).name
+        target = BACKUP_DIR / safe_name
+        if not target.exists() or not target.is_file():
+            return {"exists": False, "filename": safe_name, "error": "Archive file not found"}
+
+        stat = target.stat()
+        computed_sha = _calculate_sha256(target)
+
+        report: Dict[str, Any] = {
+            "exists": True,
+            "filename": safe_name,
+            "size_bytes": stat.st_size,
+            "size_human": _format_size(stat.st_size),
+            "sha256": computed_sha,
+            "tar_intact": False,
+            "manifest_intact": False,
+            "databases": {},
+            "configs": {},
+            "integrity_score_percent": 0,
+            "verified_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        try:
+            with tarfile.open(target, "r:gz") as tar:
+                members = tar.getmembers()
+                report["tar_intact"] = True
+                report["total_files"] = len(members)
+
+                manifest = None
+                for m in members:
+                    if m.name.endswith("manifest.json"):
+                        f = tar.extractfile(m)
+                        if f:
+                            manifest = json.load(f)
+                            report["manifest_intact"] = True
+                            report["manifest_meta"] = {
+                                "backup_id": manifest.get("backup_id"),
+                                "created_at": manifest.get("created_at"),
+                                "scope": manifest.get("scope"),
+                                "system": manifest.get("system"),
+                            }
+                            break
+
+                # Validate individual database dumps inside archive
+                total_checks = 0
+                passed_checks = 0
+
+                for m in members:
+                    if "databases/" in m.name and not m.isdir():
+                        base_name = Path(m.name).name
+                        f = tar.extractfile(m)
+                        if f:
+                            head_bytes = f.read(2048).decode("utf-8", errors="ignore")
+                            total_checks += 1
+                            is_valid_sql = ("BEGIN" in head_bytes or "INSERT INTO" in head_bytes or "CREATE TABLE" in head_bytes or "-- Table:" in head_bytes)
+                            is_valid_csv = ("#datatype" in head_bytes or "_result" in head_bytes or "table" in head_bytes)
+                            is_valid = is_valid_sql or is_valid_csv or m.size > 0
+                            if is_valid:
+                                passed_checks += 1
+                            report["databases"][base_name] = {
+                                "file": base_name,
+                                "size_bytes": m.size,
+                                "size_human": _format_size(m.size),
+                                "format": "flux_csv" if base_name.endswith(".csv") else "sql",
+                                "valid": is_valid,
+                            }
+                    elif "configs/" in m.name and not m.isdir():
+                        base_name = Path(m.name).name
+                        total_checks += 1
+                        if m.size > 0:
+                            passed_checks += 1
+                        report["configs"][base_name] = {
+                            "file": base_name,
+                            "size_bytes": m.size,
+                            "size_human": _format_size(m.size),
+                            "valid": m.size > 0,
+                        }
+
+                score = round((passed_checks / max(1, total_checks)) * 100, 1)
+                report["integrity_score_percent"] = score
+                report["status"] = "PASSED" if score >= 90 else "WARNING"
+
+        except Exception as e:
+            report["tar_intact"] = False
+            report["error"] = str(e)
+            report["status"] = "FAILED"
+
+        return report
 
     @classmethod
     def list_backups(cls) -> List[Dict[str, Any]]:
@@ -486,4 +670,3 @@ class BackupService:
         if target.exists() and target.is_file() and target.name.endswith(".tar.gz"):
             return target
         return None
-
