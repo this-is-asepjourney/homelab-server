@@ -215,6 +215,7 @@ async def create_project(
     # Register Local DNS & Ingress Routing
     if project.domain:
         try:
+            # pyrefly: ignore[missing-import]
             from app.modules.dns.service import DnsService
             hp = 3000
             if project.port_mappings and ":" in project.port_mappings:
@@ -425,6 +426,7 @@ def delete_project(
     # Remove Local DNS & Ingress Routing
     if p.domain:
         try:
+            # pyrefly: ignore[missing-import]
             from app.modules.dns.service import DnsService
             DnsService.remove_domain_route(p.domain)
         except Exception:

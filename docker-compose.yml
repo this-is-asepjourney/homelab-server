@@ -115,6 +115,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./Personal Api Platform/app:/app/app:rw
+      - ./Personal Api Platform/apps:/app/apps:rw
       - psm-storage:/opt/psm
       - homelab-backups:/app/backups
       - ./dns/homelab.hosts:/app/dns/homelab.hosts:rw
@@ -151,6 +152,7 @@ services:
       dockerfile: infrastructure/docker/Dockerfile.web
     container_name: psm-web
     restart: unless-stopped
+    stop_grace_period: 3s
     mem_limit: 256m
     cpus: 0.50
     ports:
