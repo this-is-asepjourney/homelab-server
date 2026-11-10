@@ -595,4 +595,20 @@ export const api = {
     a.remove();
     window.URL.revokeObjectURL(url);
   },
+
+  // PAP Core & Worker Decoupled Operations
+  async getWorkerStatus() {
+    const res = await fetchWithAuth('/api/v1/system/worker-status');
+    return res.ok ? res.json() : null;
+  },
+
+  async getBackupsList() {
+    const res = await fetchWithAuth('/api/v1/backups');
+    return res.ok ? res.json() : null;
+  },
+
+  async verifyBackupIntegrity(filename: string) {
+    const res = await fetchWithAuth(`/api/v1/backups/${encodeURIComponent(filename)}/verify`, { method: 'POST' });
+    return res.ok ? res.json() : null;
+  },
 };

@@ -19,6 +19,7 @@ import {
   ExternalLink,
   Globe,
   Trash2,
+  Radio,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 
@@ -212,6 +213,13 @@ export default function DashboardPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Link
+              href="/mission-control"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium transition-all shadow-sm"
+            >
+              <Radio className="w-3.5 h-3.5" />
+              <span>Buka Mission Control</span>
+            </Link>
             <button
               onClick={handleSyncPap}
               disabled={syncingPap}

@@ -24,6 +24,7 @@ import {
   Bell,
   AlertTriangle,
   Network,
+  Radio,
 } from 'lucide-react';
 import { useTheme } from './theme-provider';
 import { api, getAuthToken } from '../lib/api';
@@ -36,6 +37,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+  { name: 'Mission Control', href: '/mission-control', icon: Radio },
   { name: 'Servers', href: '/servers', icon: Server },
   { name: 'App Store', href: '/templates', icon: Boxes },
   { name: 'Projects', href: '/projects', icon: FolderGit2 },
