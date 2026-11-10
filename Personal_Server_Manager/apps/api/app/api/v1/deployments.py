@@ -129,10 +129,11 @@ async def create_git_deployment(
     # Auto-provision & auto-connect PostgreSQL database for the project
     db_info, env_vars = provision_and_sync_project_db(db, project)
 
+    db_type_label = (project.db_type or db_info.get("db_type") or "Database").upper()
     db_log_msg = (
-        f"[PostgreSQL] Database '{db_info.get('db_name')}' did not exist — automatically created on {db_info.get('host')}:{db_info.get('port')} and linked to project."
+        f"[{db_type_label}] Database '{db_info.get('db_name')}' did not exist — automatically created on {db_info.get('host')}:{db_info.get('port')} and linked to project."
         if db_info.get("created")
-        else f"[PostgreSQL] Auto-connected project to database '{db_info.get('db_name')}' ({db_info.get('host')}:{db_info.get('port')})."
+        else f"[{db_type_label}] Auto-connected project to database '{db_info.get('db_name')}' ({db_info.get('host')}:{db_info.get('port')})."
     )
     db.add(
         DeploymentLog(

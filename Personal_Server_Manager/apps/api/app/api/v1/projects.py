@@ -33,6 +33,9 @@ from apps.api.app.services.db_provision_service import (
     resolve_project_db_name,
     ensure_postgres_database,
     build_postgres_env_vars,
+    ensure_mysql_database,
+    build_mysql_env_vars,
+    build_sqlite_env_vars,
     list_all_postgres_databases,
 )
 
@@ -533,27 +536,73 @@ def get_project_database_info(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Inspect the PostgreSQL database bound to this project (auto-creating if missing)."""
+    """Inspect the database bound to this project (PostgreSQL, MySQL, or SQLite)."""
     p = db.query(Project).filter(Project.id == project_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Project not found")
 
+    target_type = (p.db_type or "postgres").lower().strip()
     db_name = resolve_project_db_name(p)
-    db_info = ensure_postgres_database(db_name)
-    pg_env = build_postgres_env_vars(db_info)
 
-    # Mask password in returned env preview for UI safety while providing full info
-    masked_pass = mask_secret(db_info.get("password", ""))
+    if target_type in ("mysql", "mariadb"):
+        db_info = ensure_mysql_database(db_name)
+        db_env = build_mysql_env_vars(db_info)
+        masked_pass = mask_secret(db_info.get("password", ""))
+        user = db_info.get("user", "appuser")
+        host = db_info.get("host", "192.168.25.101")
+        port = db_info.get("port", 3306)
+        clean_db = db_info.get("db_name", db_name)
+        conn_url_internal = f"mysql://{user}:{masked_pass}@{host}:{port}/{clean_db}"
+        conn_url_external = f"mysql://{user}:{masked_pass}@{db_info.get('external_host', host)}:{port}/{clean_db}"
+        raw_url = f"mysql://{user}:{db_info.get('password', '')}@{host}:{port}/{clean_db}"
+    elif target_type == "sqlite":
+        db_info, db_env = build_sqlite_env_vars(db_name)
+        masked_pass = ""
+        conn_url_internal = db_env.get("DATABASE_URL", f"sqlite:////data/{db_name}.db")
+        conn_url_external = conn_url_internal
+        raw_url = conn_url_internal
+    elif target_type in ("none", "stateless"):
+        db_info = {
+            "db_type": "none",
+            "db_name": None,
+            "host": "N/A",
+            "external_host": "N/A",
+            "port": 0,
+            "user": "N/A",
+            "created": False,
+            "connected": False,
+            "tables": [],
+            "tables_count": 0,
+            "size_bytes": 0,
+        }
+        db_env = {}
+        masked_pass = ""
+        conn_url_internal = "none"
+        conn_url_external = "none"
+        raw_url = ""
+    else:  # postgres default
+        db_info = ensure_postgres_database(db_name)
+        db_env = build_postgres_env_vars(db_info)
+        masked_pass = mask_secret(db_info.get("password", ""))
+        user = db_info.get("user", "appuser")
+        host = db_info.get("host", "192.168.25.101")
+        port = db_info.get("port", 5432)
+        clean_db = db_info.get("db_name", db_name)
+        conn_url_internal = f"postgresql://{user}:{masked_pass}@{host}:{port}/{clean_db}"
+        conn_url_external = f"postgresql://{user}:{masked_pass}@{db_info.get('external_host', host)}:{port}/{clean_db}"
+        raw_url = f"postgresql://{user}:{db_info.get('password', '')}@{host}:{port}/{clean_db}"
+
     return {
         **db_info,
         "masked_password": masked_pass,
-        "masked_connection_url_internal": f"postgresql://{db_info['user']}:{masked_pass}@{db_info['host']}:{db_info['port']}/{db_info['db_name']}",
-        "masked_connection_url_external": f"postgresql://{db_info['user']}:{masked_pass}@{db_info['external_host']}:{db_info['port']}/{db_info['db_name']}",
+        "masked_connection_url_internal": conn_url_internal,
+        "masked_connection_url_external": conn_url_external,
+        "connection_url_internal": raw_url,
         "env_preview": {
             k: (mask_secret(v) if "PASS" in k or "URL" in k or "URI" in k else v)
-            for k, v in pg_env.items()
+            for k, v in db_env.items()
         },
-        "env_full": pg_env,
+        "env_full": db_env,
     }
 
 
@@ -564,18 +613,20 @@ def provision_project_database_endpoint(
     current_user: User = Depends(require_role("owner", "admin", "operator")),
     db: Session = Depends(get_db),
 ):
-    """Ensure the project's PostgreSQL database exists and inject/sync connection environment variables."""
+    """Ensure the project's database exists (PostgreSQL, MySQL, SQLite) and inject/sync connection environment variables."""
     p = db.query(Project).filter(Project.id == project_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Project not found")
 
     custom_db = payload.db_name if payload else None
+    target_type = (payload.db_type if (payload and payload.db_type) else p.db_type) or "postgres"
     override = payload.override_env if payload else True
 
     db_info, merged_env = provision_and_sync_project_db(
         db=db,
         project=p,
         custom_db_name=custom_db,
+        db_type=target_type,
         override_existing_env=override,
     )
 
@@ -587,6 +638,7 @@ def provision_project_database_endpoint(
         user_id=current_user.id,
         details={
             "project": p.name,
+            "db_type": target_type,
             "db_name": db_info.get("db_name"),
             "created": db_info.get("created"),
             "host": db_info.get("host"),

@@ -219,7 +219,7 @@ class ProjectCreate(BaseModel):
 
 class ProjectDatabaseProvisionRequest(BaseModel):
     db_name: Optional[str] = None
-    db_type: Optional[str] = "postgres"  # postgres, mysql, sqlite
+    db_type: Optional[str] = None  # postgres, mysql, sqlite, none
     override_env: bool = True
 
 class ProjectUpdate(BaseModel):

@@ -315,12 +315,15 @@ export const api = {
     return res.ok ? res.json() : null;
   },
 
-  async provisionProjectDatabase(id: string, dbName?: string, overrideEnv = true) {
+  async provisionProjectDatabase(id: string, dbName?: string, overrideEnv = true, dbType?: string) {
     const res = await fetchWithAuth(`/api/v1/projects/${id}/database/provision`, {
       method: 'POST',
-      body: JSON.stringify({ db_name: dbName || null, override_env: overrideEnv }),
+      body: JSON.stringify({ db_name: dbName || null, override_env: overrideEnv, db_type: dbType || null }),
     });
-    if (!res.ok) throw new Error('Failed to provision PostgreSQL database');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to provision database');
+    }
     return res.json();
   },
 

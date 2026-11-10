@@ -43,6 +43,7 @@ export default function ProjectDetailPage() {
   const [savingPorts, setSavingPorts] = useState(false);
   const [provisioningDb, setProvisioningDb] = useState(false);
   const [customDbName, setCustomDbName] = useState('');
+  const [selectedDbType, setSelectedDbType] = useState<string>('postgres');
   const [copiedWebhook, setCopiedWebhook] = useState(false);
   const [copiedDbUrl, setCopiedDbUrl] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -67,8 +68,11 @@ export default function ProjectDetailPage() {
       setDbInfo(dbData);
       setServers(s);
       setPortMappingsInput(p?.port_mappings || '3000:3000');
-      if (dbData?.db_name && !customDbName) {
+      setSelectedDbType(p?.db_type || dbData?.db_type || 'postgres');
+      if (dbData?.db_name) {
         setCustomDbName(dbData.db_name);
+      } else if (p?.db_name) {
+        setCustomDbName(p.db_name);
       }
     } catch (err) {
       console.error(err);
@@ -115,14 +119,22 @@ export default function ProjectDetailPage() {
     }
   };
 
-  const handleProvisionDatabase = async (e?: React.FormEvent) => {
+  const handleProvisionDatabase = async (e?: React.FormEvent, forcedType?: string) => {
     if (e) e.preventDefault();
     try {
       setProvisioningDb(true);
-      await api.provisionProjectDatabase(projectId, customDbName.trim() || undefined, true);
+      const targetType = forcedType || selectedDbType || project?.db_type || 'postgres';
+      const targetName = customDbName.trim() || undefined;
+      // Update project record with the chosen engine & name
+      await api.updateProject(projectId, {
+        db_type: targetType,
+        db_name: targetName,
+      });
+      // Provision/sync with provider engine
+      await api.provisionProjectDatabase(projectId, targetName, true, targetType);
       await loadData();
     } catch (err: any) {
-      alert(err.message || 'Failed to provision PostgreSQL database');
+      alert(err.message || 'Failed to provision or sync database');
     } finally {
       setProvisioningDb(false);
     }
@@ -165,6 +177,28 @@ export default function ProjectDetailPage() {
   const targetServer = servers.find((s) => s.id === project?.server_id);
   const serverHost = targetServer?.hostname || 'localhost';
 
+  const currentDbType = (project?.db_type || dbInfo?.db_type || 'postgres').toLowerCase();
+  const dbTypeLabel =
+    currentDbType === 'mysql'
+      ? 'MySQL'
+      : currentDbType === 'mariadb'
+      ? 'MariaDB'
+      : currentDbType === 'sqlite'
+      ? 'SQLite'
+      : currentDbType === 'none'
+      ? 'Stateless'
+      : 'PostgreSQL';
+  const dbTypeBadge =
+    currentDbType === 'mysql'
+      ? 'MySQL'
+      : currentDbType === 'mariadb'
+      ? 'MariaDB'
+      : currentDbType === 'sqlite'
+      ? 'SQLite'
+      : currentDbType === 'none'
+      ? 'No DB'
+      : 'PG';
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -186,13 +220,13 @@ export default function ProjectDetailPage() {
                 <Globe className="w-3 h-3" />
                 <span>Port: {project?.port_mappings || '3000:3000'}</span>
               </span>
-              {dbInfo && (
+              {dbInfo && currentDbType !== 'none' && (
                 <button
                   onClick={() => setActiveTab('database')}
                   className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors"
                 >
                   <Database className="w-3 h-3" />
-                  <span>PG: {dbInfo.db_name}</span>
+                  <span>{dbTypeBadge}: {dbInfo.db_name || project?.name}</span>
                 </button>
               )}
             </div>
@@ -357,7 +391,7 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      {/* Tab: PostgreSQL Database Auto-Connect & Auto-Create */}
+      {/* Tab: Database Auto-Connect & Auto-Create */}
       {activeTab === 'database' && (
         <div className="space-y-6">
           <div className="rounded-xl border border-border bg-card p-5 space-y-5">
@@ -368,7 +402,7 @@ export default function ProjectDetailPage() {
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="font-bold text-sm text-foreground">PostgreSQL Auto-Connect & Auto-Provision</h3>
+                    <h3 className="font-bold text-sm text-foreground">{dbTypeLabel} Auto-Connect & Auto-Provision</h3>
                     <span
                       className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
                         dbInfo?.connected
@@ -380,26 +414,36 @@ export default function ProjectDetailPage() {
                     </span>
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {dbInfo?.message || 'Setiap kali project di-deploy, PSM otomatis memeriksa database di PostgreSQL, membuatnya jika belum ada, dan menghubungkannya ke container aplikasi.'}
+                    {dbInfo?.message || `Setiap kali project di-deploy, PSM otomatis memeriksa database di ${dbTypeLabel}, membuatnya jika belum ada, dan menghubungkannya ke container aplikasi.`}
                   </p>
                 </div>
               </div>
 
-              <form onSubmit={handleProvisionDatabase} className="flex items-center gap-2 text-xs">
+              <form onSubmit={handleProvisionDatabase} className="flex flex-wrap items-center gap-2 text-xs">
+                <select
+                  value={selectedDbType}
+                  onChange={(e) => setSelectedDbType(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-lg bg-background border border-border text-foreground font-mono text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                >
+                  <option value="mysql">MySQL (:3306)</option>
+                  <option value="postgres">PostgreSQL (:5432)</option>
+                  <option value="sqlite">SQLite (File)</option>
+                  <option value="none">Stateless (No DB)</option>
+                </select>
                 <input
                   type="text"
                   value={customDbName}
                   onChange={(e) => setCustomDbName(e.target.value)}
                   placeholder="database_name"
-                  className="px-3 py-1.5 rounded-lg bg-background border border-border text-foreground font-mono text-xs w-40"
+                  className="px-3 py-1.5 rounded-lg bg-background border border-border text-foreground font-mono text-xs w-36 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                 />
                 <button
                   type="submit"
                   disabled={provisioningDb}
-                  className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium flex items-center gap-1.5 disabled:opacity-50 whitespace-nowrap"
+                  className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium flex items-center gap-1.5 disabled:opacity-50 whitespace-nowrap shadow-sm transition-colors"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>{provisioningDb ? 'Provisioning...' : 'Auto-Create / Sync DB'}</span>
+                  <span>{provisioningDb ? 'Syncing...' : 'Save & Sync DB'}</span>
                 </button>
               </form>
             </div>
@@ -407,80 +451,95 @@ export default function ProjectDetailPage() {
             {/* Connection Details Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs font-mono">
               <div className="p-3.5 rounded-xl bg-background border border-border">
+                <span className="text-gray-400 font-sans block mb-1">Database Engine</span>
+                <span className="text-sm font-bold text-foreground">
+                  {currentDbType === 'mysql' && 'MySQL (Port 3306)'}
+                  {currentDbType === 'mariadb' && 'MariaDB (Port 3306)'}
+                  {currentDbType === 'postgres' && 'PostgreSQL (Port 5432)'}
+                  {currentDbType === 'sqlite' && 'SQLite (Embedded File)'}
+                  {currentDbType === 'none' && 'None / Stateless'}
+                </span>
+              </div>
+              <div className="p-3.5 rounded-xl bg-background border border-border">
                 <span className="text-gray-400 font-sans block mb-1">Database Name</span>
-                <span className="text-sm font-bold text-emerald-500">{dbInfo?.db_name || 'N/A'}</span>
+                <span className="text-sm font-bold text-emerald-500">{dbInfo?.db_name || (currentDbType === 'none' ? 'None' : 'N/A')}</span>
               </div>
               <div className="p-3.5 rounded-xl bg-background border border-border">
                 <span className="text-gray-400 font-sans block mb-1">Docker Network Host</span>
                 <span className="text-sm font-bold text-foreground">
-                  {dbInfo?.host || 'psm-postgres'}:{dbInfo?.port || 5432}
+                  {currentDbType === 'sqlite'
+                    ? (dbInfo?.file_path || '/data/*.db')
+                    : currentDbType === 'none'
+                    ? 'N/A'
+                    : `${dbInfo?.host || '192.168.25.101'}:${dbInfo?.port || (currentDbType === 'mysql' ? 3306 : 5432)}`}
                 </span>
-              </div>
-              <div className="p-3.5 rounded-xl bg-background border border-border">
-                <span className="text-gray-400 font-sans block mb-1">Database User</span>
-                <span className="text-sm font-bold text-foreground">{dbInfo?.user || 'psm'}</span>
               </div>
               <div className="p-3.5 rounded-xl bg-background border border-border">
                 <span className="text-gray-400 font-sans block mb-1">Storage Size & Tables</span>
                 <span className="text-sm font-bold text-blue-500">
-                  {formatBytes(dbInfo?.size_bytes || 0)} • {dbInfo?.tables_count || 0} Tables
+                  {formatBytes(dbInfo?.size_bytes || 0)} • {dbInfo?.tables_count ?? (dbInfo?.tables?.length || 0)} Tables
                 </span>
               </div>
             </div>
 
             {/* Connection URL Copy Box */}
-            <div className="space-y-2 text-xs">
-              <label className="block text-gray-400 font-medium">
-                Auto-Injected PostgreSQL Connection URI (<code>DATABASE_URL</code>):
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  readOnly
-                  value={dbInfo?.masked_connection_url_internal || ''}
-                  className="flex-1 px-3 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-xs"
-                />
-                <button
-                  onClick={() => {
-                    if (dbInfo?.connection_url_internal) {
-                      navigator.clipboard.writeText(dbInfo.connection_url_internal);
-                      setCopiedDbUrl(true);
-                      setTimeout(() => setCopiedDbUrl(false), 2000);
-                    }
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border hover:bg-background text-foreground transition-all"
-                >
-                  {copiedDbUrl ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedDbUrl ? 'Copied Full URL' : 'Copy Full URL'}</span>
-                </button>
+            {currentDbType !== 'none' && (
+              <div className="space-y-2 text-xs">
+                <label className="block text-gray-400 font-medium">
+                  Auto-Injected {dbTypeLabel} Connection URI (<code>DATABASE_URL</code>):
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={dbInfo?.masked_connection_url_internal || dbInfo?.connection_url_internal || ''}
+                    className="flex-1 px-3 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-xs"
+                  />
+                  <button
+                    onClick={() => {
+                      const urlToCopy = dbInfo?.connection_url_internal || dbInfo?.masked_connection_url_internal;
+                      if (urlToCopy) {
+                        navigator.clipboard.writeText(urlToCopy);
+                        setCopiedDbUrl(true);
+                        setTimeout(() => setCopiedDbUrl(false), 2000);
+                      }
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border hover:bg-background text-foreground transition-all"
+                  >
+                    {copiedDbUrl ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedDbUrl ? 'Copied Full URL' : 'Copy Full URL'}</span>
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
-            {/* Public Schema Tables List */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold text-foreground flex items-center gap-1.5">
-                  <Table className="w-3.5 h-3.5 text-blue-500" />
-                  <span>Tables in Database &apos;{dbInfo?.db_name}&apos; ({dbInfo?.tables?.length || 0})</span>
-                </span>
+            {/* Schema Tables List */}
+            {currentDbType !== 'none' && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-foreground flex items-center gap-1.5">
+                    <Table className="w-3.5 h-3.5 text-blue-500" />
+                    <span>Tables in Database &apos;{dbInfo?.db_name}&apos; ({dbInfo?.tables?.length || 0})</span>
+                  </span>
+                </div>
+                {dbInfo?.tables && dbInfo.tables.length > 0 ? (
+                  <div className="flex flex-wrap gap-2 pt-1 max-h-48 overflow-y-auto">
+                    {dbInfo.tables.map((tbl: string) => (
+                      <span
+                        key={tbl}
+                        className="px-2.5 py-1 rounded-lg bg-background border border-border font-mono text-xs text-foreground"
+                      >
+                        {tbl}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-lg bg-background border border-border text-xs text-gray-400">
+                    Database <code>{dbInfo?.db_name}</code> sudah siap digunakan di {dbTypeLabel}. Tabel akan otomatis dibuat saat aplikasi menjalankan migrasi saat deploy (misalnya <code>php artisan migrate --force</code>, Prisma, atau SQLAlchemy).
+                  </div>
+                )}
               </div>
-              {dbInfo?.tables && dbInfo.tables.length > 0 ? (
-                <div className="flex flex-wrap gap-2 pt-1">
-                  {dbInfo.tables.map((tbl: string) => (
-                    <span
-                      key={tbl}
-                      className="px-2.5 py-1 rounded-lg bg-background border border-border font-mono text-xs text-foreground"
-                    >
-                      {tbl}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <div className="p-4 rounded-lg bg-background border border-border text-xs text-gray-400">
-                  Database <code>{dbInfo?.db_name}</code> sudah siap digunakan. Tabel akan otomatis dibuat saat aplikasi menjalankan migrasi saat deploy (misalnya <code>php artisan migrate --force</code>, Prisma, atau SQLAlchemy).
-                </div>
-              )}
-            </div>
+            )}
           </div>
         </div>
       )}
@@ -493,7 +552,7 @@ export default function ProjectDetailPage() {
               <div>
                 <h3 className="font-bold text-sm text-foreground">Encrypted Environment Secrets</h3>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Variables are encrypted at rest with AES-Fernet encryption and merged with PostgreSQL auto-connect credentials during deployment.
+                  Variables are encrypted at rest with AES-Fernet encryption and merged with {dbTypeLabel} auto-connect credentials during deployment.
                 </p>
               </div>
               <button
@@ -502,7 +561,7 @@ export default function ProjectDetailPage() {
                 className="px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 text-xs font-medium flex items-center gap-1.5 self-start"
               >
                 <Database className="w-3.5 h-3.5" />
-                <span>Sync PostgreSQL Env Vars</span>
+                <span>Sync {dbTypeLabel} Env Vars</span>
               </button>
             </div>
 
@@ -656,7 +715,7 @@ export default function ProjectDetailPage() {
                 <li>Tempel (Paste) URL di atas ke dalam kolom <strong>Payload URL</strong>.</li>
                 <li>Pilih Content type: <code>application/json</code>.</li>
                 <li>Pilih <em>&quot;Just the push event&quot;</em> lalu klik <strong>Add webhook</strong>.</li>
-                <li>Selesai! Setiap Anda <code>git push</code>, PSM otomatis meng-clone, mem-build, membuat/menghubungkan database PostgreSQL, dan me-restart container Docker aplikasi Anda.</li>
+                <li>Selesai! Setiap Anda <code>git push</code>, PSM otomatis meng-clone, mem-build, membuat/menghubungkan database {dbTypeLabel}, dan me-restart container Docker aplikasi Anda.</li>
               </ol>
             </div>
           </div>
@@ -666,6 +725,59 @@ export default function ProjectDetailPage() {
       {/* Tab: Settings */}
       {activeTab === 'settings' && (
         <div className="space-y-6">
+          {/* Database Engine & Configuration Form */}
+          <div className="rounded-xl border border-border bg-card p-5 space-y-4 text-xs">
+            <div>
+              <h3 className="font-bold text-sm text-foreground flex items-center gap-2">
+                <Database className="w-4 h-4 text-emerald-500" />
+                <span>Konfigurasi Engine & Nama Database</span>
+              </h3>
+              <p className="text-gray-500 mt-0.5">
+                Ubah jenis database (MySQL, PostgreSQL, SQLite, atau Stateless) dan nama database yang dihubungkan ke container aplikasi.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-gray-400 font-medium mb-1">Database Engine:</label>
+                <select
+                  value={selectedDbType}
+                  onChange={(e) => setSelectedDbType(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                >
+                  <option value="mysql">MySQL (:3306) — Cocok untuk Laravel, PHP, WordPress</option>
+                  <option value="postgres">PostgreSQL (:5432) — Cocok untuk Django, Node, Next.js, FastAPI</option>
+                  <option value="sqlite">SQLite (File /data/*.db) — Embedded file database</option>
+                  <option value="none">Stateless / No Database</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-gray-400 font-medium mb-1">Nama Database:</label>
+                <input
+                  type="text"
+                  value={customDbName}
+                  onChange={(e) => setCustomDbName(e.target.value)}
+                  placeholder="database_name"
+                  className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-1">
+              <span className="text-[11px] text-gray-400">
+                Saat disimpan, variabel koneksi (<code>DATABASE_URL</code>, <code>DB_CONNECTION</code>, <code>DB_HOST</code>, dll.) otomatis diperbarui.
+              </span>
+              <button
+                type="button"
+                onClick={() => handleProvisionDatabase()}
+                disabled={provisioningDb}
+                className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium disabled:opacity-50 transition-colors flex items-center gap-1.5 whitespace-nowrap shadow-sm"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>{provisioningDb ? 'Menyimpan...' : 'Simpan & Sinkronkan Database'}</span>
+              </button>
+            </div>
+          </div>
           {/* Port Mappings Form */}
           <div className="rounded-xl border border-border bg-card p-5 space-y-4 text-xs">
             <div>

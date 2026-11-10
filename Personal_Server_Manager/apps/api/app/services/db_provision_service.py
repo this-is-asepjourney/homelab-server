@@ -124,7 +124,7 @@ def find_working_postgres_connection() -> Optional[Dict[str, Any]]:
 
 
 def ensure_postgres_database(db_name: str) -> Dict[str, Any]:
-    """Ensure a PostgreSQL database exists, creating it if missing."""
+    """Ensure a PostgreSQL database exists, creating it if missing, and inspect tables/size."""
     clean_name = sanitize_db_name(db_name)
     pg_conn_info = find_working_postgres_connection()
     if not pg_conn_info:
@@ -132,10 +132,15 @@ def ensure_postgres_database(db_name: str) -> Dict[str, Any]:
             "db_type": "postgres",
             "db_name": clean_name,
             "host": os.getenv("POSTGRES_HOST", "192.168.25.101"),
+            "external_host": os.getenv("HOST_IP", "192.168.25.101"),
             "port": 5432,
             "user": os.getenv("POSTGRES_USER", "appuser"),
             "password": os.getenv("POSTGRES_PASSWORD", "admin12345"),
             "created": False,
+            "connected": False,
+            "tables": [],
+            "tables_count": 0,
+            "size_bytes": 0,
             "error": "PostgreSQL host unreachable",
         }
 
@@ -158,6 +163,25 @@ def ensure_postgres_database(db_name: str) -> Dict[str, Any]:
         cur.close()
         conn.close()
 
+        # Connect to specific database to inspect tables and storage size
+        tables: List[str] = []
+        size_bytes = 0
+        try:
+            db_conn = _try_pg_connect(host, port, user, password, clean_name, timeout=3)
+            db_cur = db_conn.cursor()
+            db_cur.execute(
+                "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename ASC"
+            )
+            tables = [row[0] for row in db_cur.fetchall()]
+            db_cur.execute("SELECT pg_database_size(%s)", (clean_name,))
+            size_row = db_cur.fetchone()
+            if size_row and size_row[0]:
+                size_bytes = int(size_row[0])
+            db_cur.close()
+            db_conn.close()
+        except Exception:
+            pass
+
         external_host = os.getenv("HOST_IP", "192.168.25.101")
         return {
             "db_type": "postgres",
@@ -168,16 +192,25 @@ def ensure_postgres_database(db_name: str) -> Dict[str, Any]:
             "user": user,
             "password": password,
             "created": created,
+            "connected": True,
+            "tables": tables,
+            "tables_count": len(tables),
+            "size_bytes": size_bytes,
         }
     except Exception as e:
         return {
             "db_type": "postgres",
             "db_name": clean_name,
             "host": host,
+            "external_host": os.getenv("HOST_IP", "192.168.25.101"),
             "port": port,
             "user": user,
             "password": password,
             "created": False,
+            "connected": False,
+            "tables": [],
+            "tables_count": 0,
+            "size_bytes": 0,
             "error": str(e),
         }
 
@@ -254,23 +287,29 @@ def find_working_mysql_connection() -> Optional[Dict[str, Any]]:
 
 
 def ensure_mysql_database(db_name: str, target_user: Optional[str] = None) -> Dict[str, Any]:
-    """Ensure a project-specific MySQL database exists, creating it if missing and granting privileges to project user."""
+    """Ensure a project-specific MySQL database exists, creating it if missing and granting privileges to project user, and inspect tables/size."""
     import pymysql
 
     clean_name = sanitize_db_name(db_name)
     conn_info = find_working_mysql_connection()
     app_user = target_user or os.getenv("MYSQL_USER", "appuser")
     app_pass = os.getenv("MYSQL_PASSWORD", "admin12345")
+    external_host = os.getenv("HOST_IP", "192.168.25.101")
 
     if not conn_info:
         return {
             "db_type": "mysql",
             "db_name": clean_name,
             "host": os.getenv("MYSQL_HOST") or os.getenv("STOCK_DB_HOST", "192.168.25.101"),
+            "external_host": external_host,
             "port": 3306,
             "user": app_user,
             "password": app_pass,
             "created": False,
+            "connected": False,
+            "tables": [],
+            "tables_count": 0,
+            "size_bytes": 0,
             "error": "MySQL host unreachable",
         }
 
@@ -297,6 +336,25 @@ def ensure_mysql_database(db_name: str, target_user: Optional[str] = None) -> Di
         except Exception:
             pass
 
+        # Inspect tables and storage size in this database
+        tables: List[str] = []
+        size_bytes = 0
+        try:
+            cur.execute(
+                "SELECT TABLE_NAME, (DATA_LENGTH + INDEX_LENGTH) "
+                "FROM information_schema.TABLES "
+                "WHERE TABLE_SCHEMA = %s AND TABLE_TYPE = 'BASE TABLE' "
+                "ORDER BY TABLE_NAME ASC",
+                (clean_name,)
+            )
+            rows = cur.fetchall()
+            for r in rows:
+                tables.append(r[0])
+                if r[1]:
+                    size_bytes += int(r[1])
+        except Exception:
+            pass
+
         conn.commit()
         cur.close()
         conn.close()
@@ -305,20 +363,30 @@ def ensure_mysql_database(db_name: str, target_user: Optional[str] = None) -> Di
             "db_type": "mysql",
             "db_name": clean_name,
             "host": host,
+            "external_host": external_host,
             "port": port,
             "user": app_user,
             "password": app_pass,
             "created": created,
+            "connected": True,
+            "tables": tables,
+            "tables_count": len(tables),
+            "size_bytes": size_bytes,
         }
     except Exception as e:
         return {
             "db_type": "mysql",
             "db_name": clean_name,
             "host": host,
+            "external_host": external_host,
             "port": port,
             "user": app_user,
             "password": app_pass,
             "created": False,
+            "connected": False,
+            "tables": [],
+            "tables_count": 0,
+            "size_bytes": 0,
             "error": str(e),
         }
 
@@ -329,27 +397,6 @@ def build_mysql_env_vars(db_info: Dict[str, Any]) -> Dict[str, str]:
     db_name = db_info.get("db_name") or "appdb"
     user = db_info.get("user") or os.getenv("MYSQL_USER", "appuser")
     password = db_info.get("password") or os.getenv("MYSQL_PASSWORD", "admin12345")
-    conn_url = f"mysql+pymysql://{user}:{password}@{host}:{port}/{db_name}"
-    standard_url = f"mysql://{user}:{password}@{host}:{port}/{db_name}"
-
-    return {
-        "DATABASE_URL": conn_url,
-        "MYSQL_URL": standard_url,
-        "SQLALCHEMY_DATABASE_URI": conn_url,
-        "MYSQL_HOST": host,
-        "MYSQL_PORT": port,
-        "MYSQL_DATABASE": db_name,
-        "MYSQL_USER": user,
-        "MYSQL_PASSWORD": password,
-        "DB_CONNECTION": "mysql",
-        "DB_HOST": host,
-        "DB_PORT": port,
-        "DB_DATABASE": db_name,
-        "DB_USERNAME": user,
-        "DB_PASSWORD": password,
-    }
-    user = db_info.get("user") or "pap_stock_reader"
-    password = db_info.get("password") or "admin12345"
     conn_url = f"mysql+pymysql://{user}:{password}@{host}:{port}/{db_name}"
     standard_url = f"mysql://{user}:{password}@{host}:{port}/{db_name}"
 
@@ -382,11 +429,35 @@ def build_sqlite_env_vars(db_name: str) -> Tuple[Dict[str, Any], Dict[str, str]]
     sqlite_file = f"/data/{clean_name}.db"
     conn_url = f"sqlite:////{sqlite_file}"
 
+    tables: List[str] = []
+    size_bytes = 0
+    for pth in [sqlite_file, f"./data/{clean_name}.db", f"Personal_Server_Manager/data/{clean_name}.db"]:
+        if os.path.exists(pth):
+            try:
+                size_bytes = os.path.getsize(pth)
+                import sqlite3
+                sconn = sqlite3.connect(pth)
+                scur = sconn.cursor()
+                scur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name ASC")
+                tables = [r[0] for r in scur.fetchall()]
+                sconn.close()
+                break
+            except Exception:
+                pass
+
     db_info = {
         "db_type": "sqlite",
         "db_name": clean_name,
         "file_path": sqlite_file,
+        "host": "localhost",
+        "external_host": "localhost",
+        "port": 0,
+        "user": "N/A",
         "created": True,
+        "connected": True,
+        "tables": tables,
+        "tables_count": len(tables),
+        "size_bytes": size_bytes,
     }
     env_vars = {
         "DATABASE_URL": conn_url,
