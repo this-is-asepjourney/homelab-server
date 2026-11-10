@@ -231,16 +231,18 @@ server {{
     @classmethod
     def reload_router(cls) -> None:
         """Attempts to signal the router container to reload its configuration."""
-        try:
-            # Try docker exec if docker CLI is available in container or socket
-            subprocess.run(
-                ["docker", "exec", "homelab-router", "nginx", "-s", "reload"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=3,
-            )
-        except Exception:
-            pass
+        for cname in ["homelab_router", "homelab-router"]:
+            try:
+                res = subprocess.run(
+                    ["docker", "exec", cname, "nginx", "-s", "reload"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=3,
+                )
+                if res.returncode == 0:
+                    break
+            except Exception:
+                pass
 
     @classmethod
     def generate_hosts_file_content(cls) -> str:
