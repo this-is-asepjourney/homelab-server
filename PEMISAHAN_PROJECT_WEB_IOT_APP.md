@@ -98,3 +98,4 @@ Domain bisnis terisolasi murni untuk keperluan operasional kasir & penjualan.
 | `stock_umkm` (Database) | **`stock_umkm`** | **BUSINESS** | Tetap terisolasi khusus untuk bisnis POS |
 | `pap-api` | **PAP Core API Platform** | **APP** | Central API Gateway homelab |
 | `psm-web` | **Mission Control / PSM Web** | **WEB** | Dashboard manajemen homelab |
+
