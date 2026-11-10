@@ -29,6 +29,7 @@ from app.modules.monitoring.router import router as monitoring_router
 from app.modules.permissions.router import router as permissions_router
 from app.modules.projects.router import router as projects_router
 from app.modules.server.router import router as server_router
+from app.modules.traffic.router import router as traffic_router
 from app.modules.users.router import router as users_router
 from app.modules.webhooks.router import router as webhooks_router
 from app.services.bootstrap import seed_platform_registry
@@ -135,6 +136,7 @@ def create_app() -> FastAPI:
     api_v1.include_router(auth_router)
     api_v1.include_router(backups_router)  # Unified Backup & Disaster Recovery
     api_v1.include_router(dns_router)  # Local DNS & Virtual Host Manager
+    api_v1.include_router(traffic_router)  # Realtime API Traffic Streaming & Topology Telemetry
     api_v1.include_router(users_router)
     api_v1.include_router(permissions_router)
     api_v1.include_router(projects_router)

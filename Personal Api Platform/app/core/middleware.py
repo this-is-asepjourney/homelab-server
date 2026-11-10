@@ -111,5 +111,20 @@ class RequestContextAndSecurityMiddleware(BaseHTTPMiddleware):
                 }
             },
         )
+
+        # Broadcast real API traffic event for live topology visualization
+        try:
+            from app.modules.traffic.broadcaster import traffic_broadcaster
+            client_ip = request.client.host if request.client else "127.0.0.1"
+            traffic_broadcaster.record_and_broadcast(
+                method=request.method,
+                path=request.url.path,
+                status=response.status_code,
+                duration_ms=duration_ms,
+                client_ip=client_ip,
+            )
+        except Exception:
+            pass
+
         return response
 

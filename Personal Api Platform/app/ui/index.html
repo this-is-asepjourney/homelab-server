@@ -92,6 +92,71 @@
     .pulse-dot {
       animation: pulse 1.5s infinite;
     }
+    .pulse-dot-red {
+      background-color: #ef4444 !important;
+      box-shadow: 0 0 10px #ef4444 !important;
+      animation: pulseRed 1.2s infinite !important;
+    }
+    @keyframes pulseRed {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.35); opacity: 1; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    .topo-node {
+      transition: filter 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      transform-origin: center;
+      cursor: pointer;
+    }
+    .topo-node:hover {
+      filter: drop-shadow(0 0 14px rgba(96, 165, 250, 0.7));
+    }
+    .stream-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.4rem 0.85rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      background: rgba(16, 185, 129, 0.12);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      box-shadow: 0 0 12px rgba(16, 185, 129, 0.2);
+    }
+    .stream-pill.disconnected {
+      background: rgba(239, 68, 68, 0.12);
+      color: #f87171;
+      border-color: rgba(239, 68, 68, 0.3);
+      box-shadow: none;
+    }
+    .mode-switch-group {
+      display: inline-flex;
+      background: #0b1324;
+      border: 1px solid #203158;
+      border-radius: 10px;
+      padding: 3px;
+      gap: 4px;
+    }
+    .mode-btn {
+      padding: 0.4rem 0.85rem;
+      border-radius: 7px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      cursor: pointer;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .mode-btn:hover { color: #fff; }
+    .mode-btn.active {
+      background: linear-gradient(135deg, #1d4ed8, #2563eb);
+      color: #fff;
+      box-shadow: 0 2px 8px rgba(37, 99, 235, 0.4);
+    }
     @keyframes pulse {
       0% { transform: scale(0.95); opacity: 0.7; }
       50% { transform: scale(1.3); opacity: 1; }
@@ -372,19 +437,19 @@
           <div class="card-desc">PAP + PSM + IoT Unified Gateway</div>
         </div>
         <div class="card" style="border-left: 4px solid var(--success);">
-          <div class="card-desc">Simulasi Paket Data</div>
-          <div class="card-stat" style="color: #34d399;" id="sim-packet-count">142</div>
-          <div class="card-desc">Paket REST &amp; MQTT Terkirim</div>
+          <div class="card-desc">Total Permintaan API (Realtime)</div>
+          <div class="card-stat" style="color: #34d399;" id="sim-packet-count">0</div>
+          <div class="card-desc">Paket REST, WebSocket &amp; MQTT</div>
         </div>
         <div class="card" style="border-left: 4px solid var(--cyan);">
-          <div class="card-desc">Rata-rata Latensi Core</div>
+          <div class="card-desc">Latensi Rata-rata Gateway</div>
           <div class="card-stat" style="color: #22d3ee;" id="sim-latency">1.2 ms</div>
-          <div class="card-desc">Internal Memory Bus &amp; Socket</div>
+          <div class="card-desc">Durasi Eksekusi Server Asli</div>
         </div>
         <div class="card" style="border-left: 4px solid var(--purple);">
-          <div class="card-desc">Proyek Terhubung</div>
-          <div class="card-stat" style="color: #c084fc;">7 Proyek</div>
-          <div class="card-desc">100% Terisolasi &amp; Zero Duplication</div>
+          <div class="card-desc">Mode Aliran Trafik</div>
+          <div class="card-stat" style="color: #c084fc; font-size: 1.35rem;" id="active-mode-label">🔴 Live Stream</div>
+          <div class="card-desc">100% Real-time Server Traffic</div>
         </div>
       </div>
 
@@ -392,17 +457,30 @@
       <div class="topology-container">
         <div class="topology-header">
           <div>
-            <div style="font-size: 1.15rem; font-weight: 800; color: #fff; display: flex; align-items: center; gap: 0.5rem;">
+            <div style="font-size: 1.15rem; font-weight: 800; color: #fff; display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
               <span>⚡ Peta Arsitektur Komunikasi API Homelab Server</span>
-              <span class="badge badge-success" style="font-size: 0.7rem;"><span class="badge-dot pulse-dot"></span> LIVE 60 FPS</span>
+              <span id="stream-status-pill" class="stream-pill">
+                <span class="badge-dot pulse-dot pulse-dot-red"></span>
+                <span id="stream-status-text">🔴 LIVE REALTIME API STREAM</span>
+              </span>
+              <span class="badge badge-info" style="font-size: 0.7rem;">60-120 FPS BUTTERY SMOOTH</span>
             </div>
-            <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.2rem;">
-              Visualisasi aliran data interaktif: Jalur komunikasi real-time antar Hardware, Web Dashboard, Broker MQTT, dan Database Mandiri.
+            <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.25rem;">
+              Visualisasi real-time jalur komunikasi fisik antar Hardware ESP32, Dashboard Web, Mosquitto MQTT, dan Database (Postgres/MySQL). Setiap request nyata ke API akan memicu aliran paket data secara instan!
             </div>
           </div>
-          <div style="display: flex; gap: 0.5rem; align-items: center;">
-            <button class="sim-btn sim-btn-auto active" id="btn-toggle-auto" onclick="toggleAutoSimulation()">
-              <span id="auto-status-indicator">⏸️ Jeda Simulasi</span>
+          <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+            <!-- MODE TOGGLE -->
+            <div class="mode-switch-group">
+              <button class="mode-btn active" id="btn-mode-live" onclick="setLiveMode(true)">
+                <span>🔴</span> Live API Stream
+              </button>
+              <button class="mode-btn" id="btn-mode-sim" onclick="setLiveMode(false)">
+                <span>🧪</span> Uji Coba Manual
+              </button>
+            </div>
+            <button class="sim-btn sim-btn-auto" id="btn-toggle-auto" style="display: none;" onclick="toggleAutoSimulation()">
+              <span id="auto-status-indicator">▶️ Auto Test Generator</span>
             </button>
           </div>
         </div>
@@ -450,7 +528,7 @@
             <!-- NODES -->
 
             <!-- 1. CENTER HUB: PAP CENTRAL API GATEWAY -->
-            <g id="node-core" transform="translate(500, 240)">
+            <g id="node-core" class="topo-node" transform="translate(500, 240)">
               <circle r="65" fill="#1e3a8a" opacity="0.3" filter="url(#glowCore)"/>
               <circle r="52" fill="url(#coreGrad)" stroke="#60a5fa" stroke-width="3"/>
               <text y="-14" text-anchor="middle" font-size="22">🛡️</text>
@@ -460,7 +538,7 @@
             </g>
 
             <!-- 2. ESP32 ETERNAL (HARDWARE) -->
-            <g id="node-esp32" transform="translate(160, 90)">
+            <g id="node-esp32" class="topo-node" transform="translate(160, 90)">
               <rect x="-80" y="-35" width="160" height="70" rx="10" fill="url(#nodeGrad)" stroke="#38bdf8" stroke-width="2"/>
               <text x="-65" y="-12" font-size="18">📟</text>
               <text x="-40" y="-12" fill="#38bdf8" font-size="11" font-weight="800">ESP32 Eternal</text>
@@ -469,7 +547,7 @@
             </g>
 
             <!-- 3. HEATPRESS HUB WEB -->
-            <g id="node-hub" transform="translate(140, 240)">
+            <g id="node-hub" class="topo-node" transform="translate(140, 240)">
               <rect x="-80" y="-35" width="160" height="70" rx="10" fill="url(#nodeGrad)" stroke="#34d399" stroke-width="2"/>
               <text x="-65" y="-12" font-size="18">🖥️</text>
               <text x="-40" y="-12" fill="#34d399" font-size="11" font-weight="800">HeatpressHub Web</text>
@@ -478,7 +556,7 @@
             </g>
 
             <!-- 4. STOCK UMKM -->
-            <g id="node-stock" transform="translate(160, 390)">
+            <g id="node-stock" class="topo-node" transform="translate(160, 390)">
               <rect x="-80" y="-35" width="160" height="70" rx="10" fill="url(#nodeGrad)" stroke="#fbbf24" stroke-width="2"/>
               <text x="-65" y="-12" font-size="18">💼</text>
               <text x="-40" y="-12" fill="#fbbf24" font-size="11" font-weight="800">Stock UMKM POS</text>
@@ -487,7 +565,7 @@
             </g>
 
             <!-- 5. PSM CONTROL PLANE -->
-            <g id="node-psm" transform="translate(840, 90)">
+            <g id="node-psm" class="topo-node" transform="translate(840, 90)">
               <rect x="-80" y="-35" width="160" height="70" rx="10" fill="url(#nodeGrad)" stroke="#a78bfa" stroke-width="2"/>
               <text x="-65" y="-12" font-size="18">🎛️</text>
               <text x="-40" y="-12" fill="#a78bfa" font-size="11" font-weight="800">PSM Console</text>
@@ -496,7 +574,7 @@
             </g>
 
             <!-- 6. MOSQUITTO MQTT -->
-            <g id="node-mqtt" transform="translate(860, 240)">
+            <g id="node-mqtt" class="topo-node" transform="translate(860, 240)">
               <rect x="-80" y="-35" width="160" height="70" rx="10" fill="url(#nodeGrad)" stroke="#60a5fa" stroke-width="2"/>
               <text x="-65" y="-12" font-size="18">📡</text>
               <text x="-40" y="-12" fill="#60a5fa" font-size="11" font-weight="800">Mosquitto MQTT</text>
@@ -505,7 +583,7 @@
             </g>
 
             <!-- 7. GRAFANA & PROMETHEUS -->
-            <g id="node-grafana" transform="translate(840, 390)">
+            <g id="node-grafana" class="topo-node" transform="translate(840, 390)">
               <rect x="-80" y="-35" width="160" height="70" rx="10" fill="url(#nodeGrad)" stroke="#f43f5e" stroke-width="2"/>
               <text x="-65" y="-12" font-size="18">📊</text>
               <text x="-40" y="-12" fill="#f43f5e" font-size="11" font-weight="800">Grafana &amp; Prom</text>
@@ -514,7 +592,7 @@
             </g>
 
             <!-- 8. MYSQL 8.4 SERVER -->
-            <g id="node-mysql" transform="translate(390, 420)">
+            <g id="node-mysql" class="topo-node" transform="translate(390, 420)">
               <rect x="-70" y="-28" width="140" height="56" rx="8" fill="url(#nodeGrad)" stroke="#f59e0b" stroke-width="1.8"/>
               <text x="-58" y="-7" font-size="15">🐬</text>
               <text x="-35" y="-7" fill="#fbbf24" font-size="10" font-weight="800">MySQL 8.4</text>
@@ -523,7 +601,7 @@
             </g>
 
             <!-- 9. POSTGRESQL SERVER -->
-            <g id="node-postgres" transform="translate(610, 420)">
+            <g id="node-postgres" class="topo-node" transform="translate(610, 420)">
               <rect x="-70" y="-28" width="140" height="56" rx="8" fill="url(#nodeGrad)" stroke="#38bdf8" stroke-width="1.8"/>
               <text x="-58" y="-7" font-size="15">🐘</text>
               <text x="-35" y="-7" fill="#38bdf8" font-size="10" font-weight="800">PostgreSQL</text>
@@ -1031,117 +1109,261 @@
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // REALTIME TOPOLOGY & PARTICLE SIMULATION ENGINE (CANVAS 60 FPS)
+    // HIGH-PRECISION REALTIME TOPOLOGY & PARTICLE ENGINE (60-120 FPS BUTTERY SMOOTH)
     // ═════════════════════════════════════════════════════════════════════════
     const canvas = document.getElementById('topology-canvas');
     const ctx = canvas ? canvas.getContext('2d') : null;
     let particles = [];
+    let ripples = [];
     let autoSimInterval = null;
-    let packetCount = 142;
-    let autoSimActive = true;
+    let packetCount = 0;
+    let isLiveStreamActive = true;
+    let trafficSocket = null;
+    let sseSource = null;
+    let lastFrameTime = performance.now();
 
-    // Node coordinate map matching the SVG viewbox (1000 x 480)
+    // Node coordinate map matching the exact SVG viewBox (1000 x 480)
     const NODES = {
-      core:     { x: 500, y: 240, label: "Core API :8000" },
-      esp32:    { x: 160, y: 90,  label: "ESP32 Eternal" },
-      hub:      { x: 140, y: 240, label: "HeatpressHub Web" },
-      stock:    { x: 160, y: 390, label: "Stock UMKM" },
-      psm:      { x: 840, y: 90,  label: "PSM Console" },
-      mqtt:     { x: 860, y: 240, label: "Mosquitto :1883" },
-      grafana:  { x: 840, y: 390, label: "Grafana :3001" },
-      mysql:    { x: 390, y: 420, label: "MySQL :3306" },
-      postgres: { x: 610, y: 420, label: "PostgreSQL :5432" }
+      core:     { x: 500, y: 240, label: "Core API :8000", elId: "node-core" },
+      esp32:    { x: 160, y: 90,  label: "ESP32 Eternal", elId: "node-esp32" },
+      hub:      { x: 140, y: 240, label: "HeatpressHub Web", elId: "node-hub" },
+      stock:    { x: 160, y: 390, label: "Stock UMKM", elId: "node-stock" },
+      psm:      { x: 840, y: 90,  label: "PSM Console", elId: "node-psm" },
+      mqtt:     { x: 860, y: 240, label: "Mosquitto :1883", elId: "node-mqtt" },
+      grafana:  { x: 840, y: 390, label: "Grafana :3001", elId: "node-grafana" },
+      mysql:    { x: 390, y: 420, label: "MySQL :3306", elId: "node-mysql" },
+      postgres: { x: 610, y: 420, label: "PostgreSQL :5432", elId: "node-postgres" }
+    };
+
+    // Exact Quadratic Bezier Control Points matching the SVG dashed paths
+    const CABLE_ROUTES = {
+      "core-esp32":    { p0: NODES.core, cp: { x: 300, y: 120 }, p1: NODES.esp32 },
+      "esp32-core":    { p0: NODES.esp32, cp: { x: 300, y: 120 }, p1: NODES.core },
+
+      "core-hub":      { p0: NODES.core, cp: { x: 300, y: 240 }, p1: NODES.hub },
+      "hub-core":      { p0: NODES.hub, cp: { x: 300, y: 240 }, p1: NODES.core },
+
+      "core-stock":    { p0: NODES.core, cp: { x: 300, y: 360 }, p1: NODES.stock },
+      "stock-core":    { p0: NODES.stock, cp: { x: 300, y: 360 }, p1: NODES.core },
+
+      "core-psm":      { p0: NODES.core, cp: { x: 680, y: 120 }, p1: NODES.psm },
+      "psm-core":      { p0: NODES.psm, cp: { x: 680, y: 120 }, p1: NODES.core },
+
+      "core-mqtt":     { p0: NODES.core, cp: { x: 680, y: 240 }, p1: NODES.mqtt },
+      "mqtt-core":     { p0: NODES.mqtt, cp: { x: 680, y: 240 }, p1: NODES.core },
+
+      "core-grafana":  { p0: NODES.core, cp: { x: 680, y: 360 }, p1: NODES.grafana },
+      "grafana-core":  { p0: NODES.grafana, cp: { x: 680, y: 360 }, p1: NODES.core },
+
+      "core-mysql":    { p0: NODES.core, cp: { x: 420, y: 380 }, p1: NODES.mysql },
+      "mysql-core":    { p0: NODES.mysql, cp: { x: 420, y: 380 }, p1: NODES.core },
+
+      "core-postgres": { p0: NODES.core, cp: { x: 580, y: 380 }, p1: NODES.postgres },
+      "postgres-core": { p0: NODES.postgres, cp: { x: 580, y: 380 }, p1: NODES.core },
+
+      // Cross routes
+      "mqtt-grafana":  { p0: NODES.mqtt, cp: { x: 850, y: 315 }, p1: NODES.grafana },
+      "mysql-stock":   { p0: NODES.mysql, cp: { x: 275, y: 405 }, p1: NODES.stock },
+      "postgres-psm":  { p0: NODES.postgres, cp: { x: 725, y: 255 }, p1: NODES.psm }
     };
 
     function resizeCanvas() {
       if (!canvas) return;
       const rect = canvas.getBoundingClientRect();
-      canvas.width = rect.width;
-      canvas.height = rect.height;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.scale(dpr, dpr);
+    }
+
+    function getBezierPoint(route, t) {
+      const inv = 1 - t;
+      const x = inv * inv * route.p0.x + 2 * inv * t * route.cp.x + t * t * route.p1.x;
+      const y = inv * inv * route.p0.y + 2 * inv * t * route.cp.y + t * t * route.p1.y;
+      return { x, y };
     }
 
     class DataParticle {
-      constructor(fromNode, toNode, color, label, speed = 0.016) {
-        this.from = fromNode;
-        this.to = toNode;
+      constructor(route, color, label, speed = 1.15, onComplete = null) {
+        this.route = route;
         this.color = color;
         this.label = label;
         this.progress = 0;
-        this.speed = speed + (Math.random() * 0.006);
-        this.size = 5;
+        this.speed = speed; // progress percentage per second (1.2 = ~0.83s travel time)
+        this.onComplete = onComplete;
       }
 
-      update() {
-        this.progress += this.speed;
-        return this.progress <= 1;
+      update(dt) {
+        this.progress += this.speed * dt;
+        if (this.progress >= 1) {
+          this.progress = 1;
+          if (this.onComplete) {
+            this.onComplete();
+            this.onComplete = null;
+          }
+          return false;
+        }
+        return true;
       }
 
-      draw(c, w, h) {
-        // Map 1000x480 SVG coords to actual canvas dimensions
-        const scaleX = w / 1000;
-        const scaleY = h / 480;
+      draw(c, scaleX, scaleY) {
+        const curPt = getBezierPoint(this.route, this.progress);
+        const curX = curPt.x * scaleX;
+        const curY = curPt.y * scaleY;
 
-        const x1 = this.from.x * scaleX;
-        const y1 = this.from.y * scaleY;
-        const x2 = this.to.x * scaleX;
-        const y2 = this.to.y * scaleY;
+        // 1. Smooth Comet Tail along the exact curved cable line
+        const segments = 10;
+        const tailLength = 0.14;
+        for (let i = segments; i >= 1; i--) {
+          const pastT = Math.max(0, this.progress - (i / segments) * tailLength);
+          const p1 = getBezierPoint(this.route, pastT);
+          const nextT = Math.max(0, this.progress - ((i - 1) / segments) * tailLength);
+          const p2 = getBezierPoint(this.route, nextT);
 
-        // Quadratic bezier midpoint curve
-        const cx = (x1 + x2) / 2;
-        const cy = (y1 + y2) / 2 + (Math.sin(this.progress * Math.PI) * -15);
+          const ratio = 1 - (i / segments);
+          c.save();
+          c.strokeStyle = this.color;
+          c.globalAlpha = ratio * 0.75;
+          c.lineWidth = 1 + ratio * 4.5;
+          c.lineCap = 'round';
+          c.beginPath();
+          c.moveTo(p1.x * scaleX, p1.y * scaleY);
+          c.lineTo(p2.x * scaleX, p2.y * scaleY);
+          c.stroke();
+          c.restore();
+        }
 
-        // Calculate current position along curve
-        const t = this.progress;
-        const curX = (1 - t) * (1 - t) * x1 + 2 * (1 - t) * t * cx + t * t * x2;
-        const curY = (1 - t) * (1 - t) * y1 + 2 * (1 - t) * t * cy + t * t * y2;
-
+        // 2. Glowing Halo
         c.save();
-        c.shadowColor = this.color;
-        c.shadowBlur = 12;
+        c.globalAlpha = 0.35;
         c.fillStyle = this.color;
         c.beginPath();
-        c.arc(curX, curY, this.size, 0, Math.PI * 2);
+        c.arc(curX, curY, 9, 0, Math.PI * 2);
         c.fill();
 
-        // Particle trail
-        c.strokeStyle = this.color;
-        c.lineWidth = 2;
-        c.globalAlpha = 0.4;
+        // 3. Crisp Particle Core
+        c.globalAlpha = 1.0;
+        c.fillStyle = '#ffffff';
         c.beginPath();
-        c.moveTo(curX - (Math.cos(t) * 10), curY - (Math.sin(t) * 10));
-        c.lineTo(curX, curY);
+        c.arc(curX, curY, 4, 0, Math.PI * 2);
+        c.fill();
+        c.restore();
+
+        // 4. Floating Badge (Method / Status)
+        if (this.label) {
+          c.save();
+          c.font = '700 9px ui-monospace, SFMono-Regular, Menlo, Monaco, monospace';
+          const textWidth = c.measureText(this.label).width;
+          const bW = textWidth + 8;
+          const bH = 13;
+          const bX = curX - bW / 2;
+          const bY = curY - 16;
+
+          c.fillStyle = 'rgba(7, 11, 20, 0.90)';
+          c.strokeStyle = this.color;
+          c.lineWidth = 1;
+          c.beginPath();
+          c.roundRect(bX, bY, bW, bH, 3);
+          c.fill();
+          c.stroke();
+
+          c.fillStyle = '#ffffff';
+          c.fillText(this.label, bX + 4, bY + 10);
+          c.restore();
+        }
+      }
+    }
+
+    class Ripple {
+      constructor(pt, color) {
+        this.pt = pt;
+        this.color = color;
+        this.elapsed = 0;
+        this.duration = 0.45;
+      }
+      update(dt) {
+        this.elapsed += dt;
+        return this.elapsed < this.duration;
+      }
+      draw(c, scaleX, scaleY) {
+        const t = this.elapsed / this.duration;
+        const r = 8 + (34 - 8) * t;
+        c.save();
+        c.strokeStyle = this.color;
+        c.globalAlpha = (1 - t) * 0.85;
+        c.lineWidth = 2.5 * (1 - t);
+        c.beginPath();
+        c.arc(this.pt.x * scaleX, this.pt.y * scaleY, r, 0, Math.PI * 2);
         c.stroke();
         c.restore();
       }
     }
 
-    function animateParticles() {
-      if (!ctx || !canvas) return;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    function triggerNodePulse(nodeKey, color) {
+      const node = NODES[nodeKey];
+      if (!node || !node.elId) return;
+      const el = document.getElementById(node.elId);
+      if (!el) return;
+      el.style.filter = `drop-shadow(0 0 22px ${color}) brightness(1.4)`;
+      setTimeout(() => {
+        el.style.filter = '';
+      }, 260);
+    }
 
+    function animateParticles(currentTime) {
+      if (!ctx || !canvas) return;
+      const dt = Math.min((currentTime - lastFrameTime) / 1000, 0.1);
+      lastFrameTime = currentTime;
+
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = rect.width / 1000;
+      const scaleY = rect.height / 480;
+
+      ctx.clearRect(0, 0, rect.width, rect.height);
+
+      // 1. Draw shockwave ripples
+      ripples = ripples.filter(r => {
+        const alive = r.update(dt);
+        if (alive) r.draw(ctx, scaleX, scaleY);
+        return alive;
+      });
+
+      // 2. Draw smooth particles
       particles = particles.filter(p => {
-        const alive = p.update();
-        if (alive) p.draw(ctx, canvas.width, canvas.height);
+        const alive = p.update(dt);
+        p.draw(ctx, scaleX, scaleY);
         return alive;
       });
 
       requestAnimationFrame(animateParticles);
     }
 
-    function spawnPacket(fromKey, toKey, color, label, speed = 0.016) {
-      const fromNode = NODES[fromKey];
-      const toNode = NODES[toKey];
-      if (fromNode && toNode) {
-        particles.push(new DataParticle(fromNode, toNode, color, label, speed));
-        packetCount++;
-        const el = document.getElementById('sim-packet-count');
-        if (el) el.innerText = packetCount.toLocaleString();
-
-        // Fluctuating latency simulation
-        const lat = (1.1 + (Math.random() * 0.7)).toFixed(1);
-        const latEl = document.getElementById('sim-latency');
-        if (latEl) latEl.innerText = `${lat} ms`;
+    function spawnPacket(fromKey, toKey, color, label, speed = 1.15, onArrive = null) {
+      const routeKey = `${fromKey}-${toKey}`;
+      let route = CABLE_ROUTES[routeKey];
+      if (!route) {
+        if (fromKey !== 'core' && toKey !== 'core') {
+          spawnPacket(fromKey, 'core', color, label, speed, () => {
+            spawnPacket('core', toKey, color, label, speed, onArrive);
+          });
+          return;
+        }
+        const fromNode = NODES[fromKey] || NODES.core;
+        const toNode = NODES[toKey] || NODES.core;
+        route = {
+          p0: fromNode,
+          cp: { x: (fromNode.x + toNode.x) / 2, y: (fromNode.y + toNode.y) / 2 },
+          p1: toNode
+        };
       }
+
+      const p = new DataParticle(route, color, label, speed, () => {
+        ripples.push(new Ripple(route.p1, color));
+        triggerNodePulse(toKey, color);
+        if (onArrive) onArrive();
+      });
+      particles.push(p);
     }
 
     function logTerminal(tagClass, tagText, message) {
@@ -1154,7 +1376,7 @@
       row.innerHTML = `<span class="log-time">[${timeStr}]</span> <span class="${tagClass}">[${tagText}]</span> ${message}`;
       stream.prepend(row);
 
-      // Keep max 80 rows
+      // Keep maximum 80 rows
       if (stream.children.length > 80) {
         stream.removeChild(stream.lastChild);
       }
@@ -1166,101 +1388,211 @@
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // INTERACTIVE SIMULATION ACTIONS
+    // REALTIME LIVE STREAM (WEBSOCKET + SSE FALLBACK)
     // ═════════════════════════════════════════════════════════════════════════
 
+    function updateStreamBadge(connected, text) {
+      const pill = document.getElementById('stream-status-pill');
+      const textEl = document.getElementById('stream-status-text');
+      if (!pill || !textEl) return;
+      if (connected) {
+        pill.className = 'stream-pill';
+        textEl.innerText = text || '🔴 LIVE REALTIME API STREAM';
+      } else {
+        pill.className = 'stream-pill disconnected';
+        textEl.innerText = text || '⚠️ STREAM OFFLINE';
+      }
+    }
+
+    function setLiveMode(live) {
+      isLiveStreamActive = live;
+      const btnLive = document.getElementById('btn-mode-live');
+      const btnSim = document.getElementById('btn-mode-sim');
+      const btnAuto = document.getElementById('btn-toggle-auto');
+      const label = document.getElementById('active-mode-label');
+
+      if (live) {
+        btnLive.classList.add('active');
+        btnSim.classList.remove('active');
+        if (btnAuto) btnAuto.style.display = 'none';
+        if (label) label.innerText = '🔴 Live Stream';
+        stopAutoSimulation();
+        connectRealtimeTraffic();
+      } else {
+        btnLive.classList.remove('active');
+        btnSim.classList.add('active');
+        if (btnAuto) btnAuto.style.display = 'inline-flex';
+        if (label) label.innerText = '🧪 Uji Manual';
+      }
+    }
+
+    function connectRealtimeTraffic() {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/api/v1/traffic/ws`;
+
+      try {
+        if (trafficSocket) {
+          trafficSocket.close();
+          trafficSocket = null;
+        }
+        trafficSocket = new WebSocket(wsUrl);
+
+        trafficSocket.onopen = () => {
+          updateStreamBadge(true, '🔴 LIVE REALTIME API (WS)');
+          console.log('[TrafficWS] Connected to live API traffic stream');
+        };
+
+        trafficSocket.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'api_traffic') {
+              handleIncomingRealtimeTraffic(data);
+            }
+          } catch (e) {}
+        };
+
+        trafficSocket.onclose = () => {
+          updateStreamBadge(false, '🟡 RECONNECTING STREAM...');
+          setTimeout(connectSseFallback, 2500);
+        };
+
+        trafficSocket.onerror = () => {
+          if (trafficSocket) trafficSocket.close();
+        };
+      } catch (err) {
+        connectSseFallback();
+      }
+    }
+
+    function connectSseFallback() {
+      if (trafficSocket && trafficSocket.readyState === WebSocket.OPEN) return;
+      try {
+        if (sseSource) sseSource.close();
+        sseSource = new EventSource('/api/v1/traffic/stream');
+
+        sseSource.onopen = () => {
+          updateStreamBadge(true, '🔴 LIVE REALTIME API (SSE)');
+        };
+
+        sseSource.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            handleIncomingRealtimeTraffic(data);
+          } catch (e) {}
+        };
+
+        sseSource.onerror = () => {
+          updateStreamBadge(false, '⚠️ RETRYING STREAM...');
+        };
+      } catch (e) {}
+    }
+
+    function handleIncomingRealtimeTraffic(data) {
+      // Update real KPI counters
+      packetCount = data.total_requests || (packetCount + 1);
+      const countEl = document.getElementById('sim-packet-count');
+      if (countEl) countEl.innerText = packetCount.toLocaleString();
+
+      if (data.duration_ms || data.avg_latency_ms) {
+        const lat = data.duration_ms || data.avg_latency_ms;
+        const latEl = document.getElementById('sim-latency');
+        if (latEl) latEl.innerText = `${lat} ms`;
+      }
+
+      // Badge label for moving particle
+      const badgeLabel = `${data.method || 'GET'} ${data.status || 200}`;
+
+      // Spawn primary particle from source to target
+      spawnPacket(data.source || 'hub', data.target || 'core', data.color || '#3b82f6', badgeLabel, 1.25, () => {
+        // If sub-target exists (e.g. core -> mysql or core -> postgres), trigger secondary hop!
+        if (data.sub_target && data.sub_target !== data.target) {
+          spawnPacket(data.target || 'core', data.sub_target, data.color || '#3b82f6', data.tag || 'DB_SYNC', 1.35);
+        }
+      });
+
+      // Log in terminal stream
+      logTerminal(`log-tag-${data.source || 'api'}`, data.tag || 'API_REAL', `${data.detail}`);
+    }
+
+    async function hydrateInitialTraffic() {
+      try {
+        const res = await fetch('/api/v1/traffic/recent');
+        const json = await res.json();
+        if (json.stats) {
+          packetCount = json.stats.total_requests || 0;
+          const countEl = document.getElementById('sim-packet-count');
+          if (countEl) countEl.innerText = packetCount.toLocaleString();
+
+          const latEl = document.getElementById('sim-latency');
+          if (latEl) latEl.innerText = `${json.stats.avg_latency_ms || 1.2} ms`;
+        }
+
+        // Hydrate initial log terminal with real history
+        if (json.data && json.data.length > 0) {
+          json.data.slice(-5).forEach(d => {
+            logTerminal(`log-tag-${d.source || 'api'}`, d.tag || 'HISTORY', `${d.detail}`);
+          });
+        }
+      } catch (e) {}
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // MANUAL ACTION BUTTONS (EXECUTES REAL API CALLS VIA BACKEND)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    async function triggerSimAction(action) {
+      try {
+        await fetch('/api/v1/traffic/simulate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: action })
+        });
+      } catch (err) {
+        console.warn('Simulate fetch error:', err);
+      }
+    }
+
     function simulateNfcTap() {
-      // Step 1: ESP32 sends NFC tap to Core Gateway
-      spawnPacket('esp32', 'core', '#34d399', 'NFC_TAP', 0.022);
-      logTerminal('log-tag-nfc', 'NFC_TAP', 'ESP32 (192.168.25.104) &rarr; POST /api/nfc/tap &bull; UID: 058E208F87A200 (Ferdiansyah)');
-
-      setTimeout(() => {
-        // Step 2: Core queries MySQL eternal_db
-        spawnPacket('core', 'mysql', '#fbbf24', 'DB_AUTH', 0.024);
-        logTerminal('log-tag-db', 'SQL_QUERY', 'Core Gateway &rarr; MySQL :3306 &bull; SELECT FROM nfc_users WHERE uid=\'058E208F87A200\'');
-      }, 400);
-
-      setTimeout(() => {
-        // Step 3: MySQL responds to Core, Core unlocks device & updates HeatpressHub
-        spawnPacket('mysql', 'core', '#34d399', 'AUTH_OK', 0.024);
-        spawnPacket('core', 'hub', '#34d399', 'LIVE_SYNC', 0.022);
-        spawnPacket('core', 'esp32', '#22d3ee', 'RELAY_UNLOCKED', 0.022);
-        logTerminal('log-tag-nfc', 'ACCESS_GRANTED', 'Core &rarr; ESP32 &bull; Status: UNLOCKED (Durasi 2 Jam) &bull; Buzzer Bip 1x 🔊 &bull; HTTP 200 OK');
-      }, 850);
+      triggerSimAction('nfc_tap');
     }
 
     function simulateTelemetryPing() {
-      // ESP32 publishes sensor data to Mosquitto
-      spawnPacket('esp32', 'core', '#38bdf8', 'TELEMETRY', 0.02);
-      spawnPacket('core', 'mqtt', '#38bdf8', 'MQTT_PUB', 0.022);
-      logTerminal('log-tag-mqtt', 'MQTT_PUB', 'ESP32 &rarr; Mosquitto :1883 &bull; Topik /SysCtrl {suhu: 36.4&deg;C, hum: 37%, rssi: -55dBm}');
-
-      setTimeout(() => {
-        // Mosquitto to Grafana/Prometheus
-        spawnPacket('mqtt', 'grafana', '#f43f5e', 'PROM_SCRAPE', 0.022);
-        logTerminal('log-tag-mqtt', 'TELEGRAF', 'Telegraf :9273 parsed metrics &rarr; Prometheus :9001 &rarr; Grafana live chart updated');
-      }, 600);
+      triggerSimAction('telemetry');
     }
 
     function simulateStockTransaction() {
-      spawnPacket('stock', 'core', '#fbbf24', 'POS_ORDER', 0.022);
-      logTerminal('log-tag-api', 'STOCK_API', 'Kasir UMKM &rarr; POST /api/v1/stock/transactions &bull; Order #TRX-8821 (Rp 145.000)');
-
-      setTimeout(() => {
-        spawnPacket('core', 'mysql', '#fbbf24', 'DB_INSERT', 0.024);
-        logTerminal('log-tag-db', 'MYSQL_WRITE', 'Core &rarr; MySQL stock_umkm &bull; INSERT INTO transactions ledger &bull; 1.4ms');
-      }, 450);
-
-      setTimeout(() => {
-        spawnPacket('mysql', 'core', '#34d399', 'TX_COMMITTED', 0.022);
-        spawnPacket('core', 'stock', '#34d399', 'SUCCESS_200', 0.022);
-      }, 900);
+      triggerSimAction('stock');
     }
 
     function simulateRemoteUnlock() {
-      spawnPacket('hub', 'core', '#c084fc', 'UNLOCK_CMD', 0.022);
-      logTerminal('log-tag-api', 'REMOTE_CMD', 'HeatpressHub Web &rarr; POST /api/devices/unlock &bull; Operator: Ferdiansyah');
-
-      setTimeout(() => {
-        spawnPacket('core', 'esp32', '#c084fc', 'HTTP_POST', 0.024);
-        logTerminal('log-tag-nfc', 'HW_TRIGGER', 'Core Gateway &rarr; ESP32 (192.168.25.104/api/nfc/register_user) &bull; Relay GPIO26 HIGH');
-      }, 500);
+      triggerSimAction('psm_deploy');
     }
 
     function simulateBackupTrigger() {
-      spawnPacket('core', 'postgres', '#38bdf8', 'PG_DUMP', 0.018);
-      spawnPacket('core', 'mysql', '#fbbf24', 'MYSQL_DUMP', 0.018);
-      logTerminal('log-tag-sys', 'BACKUP_EXEC', 'Disaster Recovery Engine &rarr; Snapshotting DB: pap_core, psm, eternal_db, stock_umkm');
-
-      setTimeout(() => {
-        spawnPacket('postgres', 'core', '#34d399', 'DUMP_OK', 0.02);
-        spawnPacket('mysql', 'core', '#34d399', 'DUMP_OK', 0.02);
-        logTerminal('log-tag-sys', 'BACKUP_ARCHIVE', 'Backup Engine &rarr; Gzip compressed &bull; Saved to /app/backups/homelab_all.tar.gz');
-      }, 950);
+      triggerSimAction('backup');
     }
 
     function toggleAutoSimulation() {
-      autoSimActive = !autoSimActive;
       const btn = document.getElementById('btn-toggle-auto');
       const text = document.getElementById('auto-status-indicator');
-      if (autoSimActive) {
-        btn.classList.add('active');
-        text.innerText = '⏸️ Jeda Simulasi';
-        startAutoSimulation();
-      } else {
-        btn.classList.remove('active');
-        text.innerText = '▶️ Lanjutkan Simulasi';
+      if (autoSimInterval) {
         stopAutoSimulation();
+        btn.classList.remove('active');
+        text.innerText = '▶️ Auto Test Generator';
+      } else {
+        startAutoSimulation();
+        btn.classList.add('active');
+        text.innerText = '⏸️ Jeda Generator';
       }
     }
 
     function startAutoSimulation() {
       if (autoSimInterval) clearInterval(autoSimInterval);
       autoSimInterval = setInterval(() => {
-        const events = [simulateTelemetryPing, simulateNfcTap, simulateStockTransaction];
-        const chosen = events[Math.floor(Math.random() * events.length)];
-        chosen();
-      }, 3500);
+        const actions = ['nfc_tap', 'telemetry', 'stock'];
+        const chosen = actions[Math.floor(Math.random() * actions.length)];
+        triggerSimAction(chosen);
+      }, 4000);
     }
 
     function stopAutoSimulation() {
@@ -1269,7 +1601,6 @@
         autoSimInterval = null;
       }
     }
-
     // ═════════════════════════════════════════════════════════════════════════
     // BACKUPS API
     // ═════════════════════════════════════════════════════════════════════════
@@ -1534,8 +1865,10 @@
 
     document.addEventListener('DOMContentLoaded', () => {
       resizeCanvas();
-      animateParticles();
-      startAutoSimulation();
+      lastFrameTime = performance.now();
+      requestAnimationFrame(animateParticles);
+      hydrateInitialTraffic();
+      connectRealtimeTraffic();
       loadBackups();
     });
   </script>
