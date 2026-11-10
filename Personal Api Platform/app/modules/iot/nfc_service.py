@@ -162,7 +162,7 @@ class NfcService:
             conn.close()
 
     @staticmethod
-    def save_user(data: Dict[str, Any]) -> Dict[str, Any]:
+    def save_user(data: Dict[str, Any], push_to_hardware: bool = True) -> Dict[str, Any]:
         raw_uid = data.get("uid", "").strip().upper().replace(" ", "").replace(":", "")
         if not raw_uid:
             raise ValueError("UID NFC wajib diisi")
@@ -192,15 +192,16 @@ class NfcService:
                 """, (raw_uid, nama, username, role, pin, is_active, device_serial, now_str))
             saved_user = NfcService.get_user_by_uid(raw_uid) or {"uid": raw_uid, "status": "saved"}
 
-            # Auto-push ke ESP32 hardware (192.168.25.104) agar langsung aktif tanpa restart alat
-            NfcService.push_to_device(saved_user)
+            # Auto-push ke ESP32 hardware (192.168.25.104) hanya jika bukan update yang dipicu oleh hardware itu sendiri
+            if push_to_hardware:
+                NfcService.push_to_device(saved_user)
             return saved_user
         finally:
             conn.close()
 
     @staticmethod
     def push_to_device(user: Dict[str, Any]):
-        """Kirim profil user NFC langsung ke memori RAM/NVS ESP32 agar langsung GRANTED."""
+        """Kirim profil user NFC langsung ke memori RAM/NVS ESP32 agar langsung GRANTED tanpa restart alat."""
         import json
         import urllib.request
         target_ips = ["192.168.25.104"]
@@ -211,12 +212,16 @@ class NfcService:
                     "nama": user.get("nama"),
                     "username": user.get("username"),
                     "role": user.get("role", "Operator"),
-                    "pin": user.get("pin", "")
+                    "pin": user.get("pin", ""),
+                    "source": "server"
                 }).encode("utf-8")
                 req = urllib.request.Request(
                     f"http://{ip}/api/nfc/register_user",
                     data=payload,
-                    headers={"Content-Type": "application/json"},
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-Source": "server-sync"
+                    },
                     method="POST"
                 )
                 with urllib.request.urlopen(req, timeout=1.5):

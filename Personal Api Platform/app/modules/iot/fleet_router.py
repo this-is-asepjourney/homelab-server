@@ -799,10 +799,10 @@ def record_nfc_tap(payload: dict):
 @compat_devices_router.post("/api/nfc/users/register")
 @compat_devices_router.post("/nfc/users/register")
 def register_nfc_user_from_device(payload: dict):
-    """Handle hardware user registration push."""
+    """Handle hardware user registration push (prevents infinite push-back loops)."""
     from app.modules.iot.nfc_service import NfcService
     try:
-        saved = NfcService.save_user(payload)
+        saved = NfcService.save_user(payload, push_to_hardware=False)
         return {"status": "success", "message": "User registered from device", "data": saved}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
