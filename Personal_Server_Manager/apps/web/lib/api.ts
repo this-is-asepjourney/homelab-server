@@ -270,6 +270,16 @@ export const api = {
     return res.json();
   },
 
+  async getNextAvailablePort() {
+    try {
+      const res = await fetchWithAuth('/api/v1/projects/next-port');
+      if (!res.ok) return null;
+      return res.json();
+    } catch {
+      return null;
+    }
+  },
+
   async updateProject(id: string, data: any) {
     const res = await fetchWithAuth(`/api/v1/projects/${id}`, {
       method: 'PATCH',

@@ -78,6 +78,71 @@ def list_projects(
         )
     return result
 
+@router.get("/next-port")
+def get_next_available_port(
+    db: Session = Depends(get_db)
+):
+    """Detects active and reserved ports in the homelab and returns a safe, unallocated host port."""
+    import socket
+
+    # Homelab core system reserved ports
+    reserved_ports = {
+        53: "CoreDNS (:53)",
+        80: "Nginx Ingress Router (:80)",
+        1883: "Mosquitto MQTT (:1883)",
+        3000: "PSM Web Internal (:3000)",
+        3001: "Grafana Utama (:3001)",
+        3002: "Uptime Kuma (:3002)",
+        3005: "PSM Console Web (:3005)",
+        3306: "MySQL Server (:3306)",
+        5001: "Homelab Registry (:5001)",
+        5432: "PostgreSQL Server (:5432)",
+        8000: "PAP Core API Gateway (:8000)",
+        8001: "PAP Core Web UI (:8001)",
+        8080: "Vaultwarden (:8080)",
+        8081: "Apache Web (:8081)",
+        8086: "InfluxDB TSDB (:8086)",
+        8088: "HeatpressHub Web (:8088)",
+        9001: "Prometheus Server (:9001)",
+        9090: "Cockpit Console (:9090)",
+    }
+
+    # Query all ports currently mapped in projects database
+    projects = db.query(Project).all()
+    for p in projects:
+        if p.port_mappings:
+            for entry in p.port_mappings.split(","):
+                if ":" in entry:
+                    try:
+                        hp = int(entry.split(":")[0].strip())
+                        reserved_ports[hp] = f"Project: {p.name} (Port {hp})"
+                    except Exception:
+                        pass
+
+    # Find the next free port starting from 3100
+    candidate = 3100
+    while candidate < 65535:
+        if candidate not in reserved_ports:
+            # Also test socket bind to ensure nothing outside docker is using it
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.08)
+            try:
+                result = sock.connect_ex(("127.0.0.1", candidate))
+                if result != 0:  # Not listening, port is free
+                    break
+            except Exception:
+                break
+            finally:
+                sock.close()
+        candidate += 1
+
+    return {
+        "success": True,
+        "recommended_host_port": candidate,
+        "reserved_ports": reserved_ports,
+    }
+
+
 @router.post("", response_model=ProjectResponse)
 async def create_project(
     payload: ProjectCreate,

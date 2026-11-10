@@ -38,6 +38,27 @@ interface DeployProjectModalProps {
   existingProject?: any; // If provided, modal operates in "Deploy Release" mode
 }
 
+const RESERVED_SYSTEM_PORTS: Record<number, string> = {
+  53: 'CoreDNS (:53)',
+  80: 'Nginx Ingress Router (:80)',
+  1883: 'Mosquitto MQTT (:1883)',
+  3000: 'PSM Web Internal (:3000)',
+  3001: 'Grafana Utama (:3001)',
+  3002: 'Uptime Kuma (:3002)',
+  3005: 'PSM Console Web (:3005)',
+  3306: 'MySQL Server (:3306)',
+  5001: 'Homelab Registry (:5001)',
+  5432: 'PostgreSQL Server (:5432)',
+  8000: 'PAP Core Central API Gateway (:8000)',
+  8001: 'PAP Core Web UI (:8001)',
+  8080: 'Vaultwarden Password Manager (:8080)',
+  8081: 'Apache Web Server (:8081)',
+  8086: 'InfluxDB TSDB (:8086)',
+  8088: 'HeatpressHub Web (:8088)',
+  9001: 'Prometheus Server (:9001)',
+  9090: 'Cockpit Admin Console (:9090)',
+};
+
 export function DeployProjectModal({
   isOpen,
   onClose,
@@ -63,8 +84,10 @@ export function DeployProjectModal({
   const [zipFile, setZipFile] = useState<File | null>(null);
 
   // Step 2: Ports & Local DNS
-  const [hostPort, setHostPort] = useState('3000');
+  const [hostPort, setHostPort] = useState('3100');
   const [containerPort, setContainerPort] = useState('3000');
+  const [recommendedPort, setRecommendedPort] = useState(3100);
+  const [reservedPorts, setReservedPorts] = useState<Record<number, string>>(RESERVED_SYSTEM_PORTS);
   const [additionalPorts, setAdditionalPorts] = useState<Array<{ host: string; container: string }>>([]);
   const [domain, setDomain] = useState(existingProject?.domain || '');
 
@@ -83,6 +106,25 @@ export function DeployProjectModal({
   const [deploying, setDeploying] = useState(false);
   const [deployStatusText, setDeployStatusText] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Auto-discover next available free port on target server
+  useEffect(() => {
+    let mounted = true;
+    api.getNextAvailablePort().then((res) => {
+      if (mounted && res && res.recommended_host_port) {
+        setRecommendedPort(res.recommended_host_port);
+        if (res.reserved_ports) {
+          setReservedPorts({ ...RESERVED_SYSTEM_PORTS, ...res.reserved_ports });
+        }
+        if (!existingProject && (hostPort === '3000' || hostPort === '3100')) {
+          setHostPort(String(res.recommended_host_port));
+        }
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   // Initialize from existing project if supplied
   useEffect(() => {
@@ -126,6 +168,9 @@ export function DeployProjectModal({
 
   // Selected server details
   const selectedServer = servers.find((s) => s.id === serverId) || servers[0];
+  // Realtime port conflict detection
+  const currentHpNum = parseInt(hostPort.trim(), 10);
+  const portConflictReason = !isNaN(currentHpNum) ? reservedPorts[currentHpNum] : null;
   const serverHost = selectedServer?.hostname || 'localhost';
 
   // Quick port presets
@@ -134,19 +179,20 @@ export function DeployProjectModal({
     setContainerPort(cp);
   };
 
-  // Change framework presets
+  // Change framework presets with non-conflicting host port
   const handleFrameworkChange = (fw: string) => {
     setFramework(fw);
+    const safeHp = String(recommendedPort || '3100');
     if (fw === 'Next.js' || fw === 'Node.js' || fw === 'React / Vite') {
-      applyPortPreset('3000', '3000');
+      applyPortPreset(safeHp, '3000');
     } else if (fw === 'FastAPI' || fw === 'Django / Python') {
-      applyPortPreset('8000', '8000');
+      applyPortPreset(safeHp, '8000');
     } else if (fw === 'Laravel' || fw === 'PHP') {
-      applyPortPreset('8080', '80');
+      applyPortPreset(safeHp, '80');
     } else if (fw === 'Flask') {
-      applyPortPreset('5000', '5000');
+      applyPortPreset(safeHp, '5000');
     } else if (fw === 'Static HTML') {
-      applyPortPreset('8080', '80');
+      applyPortPreset(safeHp, '80');
     }
   };
 
@@ -279,6 +325,11 @@ export function DeployProjectModal({
     }
     if (!hostPort || !containerPort) {
       setErrorMsg('Host and container ports are required.');
+      setCurrentStep(2);
+      return;
+    }
+    if (portConflictReason) {
+      setErrorMsg(`Port host ${hostPort} bentrok dengan ${portConflictReason}. Silakan ganti port atau klik 'Gunakan Port Aman :${recommendedPort}'.`);
       setCurrentStep(2);
       return;
     }
@@ -644,41 +695,76 @@ export function DeployProjectModal({
                 </div>
               </div>
 
-              {/* Primary Port Inputs */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-foreground mb-1">
-                    Host Port (Server Port) <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    min={1}
-                    max={65535}
-                    value={hostPort}
-                    onChange={(e) => setHostPort(e.target.value)}
-                    placeholder="3000"
-                    className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <span className="text-[10px] text-gray-500">Port yang dibuka di server Ubuntu Anda</span>
+              {/* Primary Port Inputs & Auto-Allocator */}
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-medium text-foreground">
+                        Host Port (Port Server) <span className="text-rose-500">*</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setHostPort(String(recommendedPort))}
+                        className="text-[10px] text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1"
+                        title="Pilih port yang dijamin bebas"
+                      >
+                        <Sparkles className="w-3 h-3" /> Auto-Bebas :{recommendedPort}
+                      </button>
+                    </div>
+                    <input
+                      type="number"
+                      required
+                      min={1}
+                      max={65535}
+                      value={hostPort}
+                      onChange={(e) => setHostPort(e.target.value)}
+                      placeholder={String(recommendedPort)}
+                      className={`w-full px-3 py-2 rounded-lg bg-background border text-foreground font-mono text-sm focus:outline-none focus:ring-2 ${
+                        portConflictReason
+                          ? 'border-rose-500/80 focus:ring-rose-500'
+                          : 'border-border focus:ring-blue-500'
+                      }`}
+                    />
+                    <span className="text-[10px] text-gray-500">Port yang dibuka di server Ubuntu Anda</span>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-foreground mb-1">
+                      Container Port (Internal App) <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      min={1}
+                      max={65535}
+                      value={containerPort}
+                      onChange={(e) => setContainerPort(e.target.value)}
+                      placeholder="3000"
+                      className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <span className="text-[10px] text-gray-500">Port aplikasi (misal Next.js=3000, Web=80)</span>
+                  </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-foreground mb-1">
-                    Container Port (Internal App) <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    min={1}
-                    max={65535}
-                    value={containerPort}
-                    onChange={(e) => setContainerPort(e.target.value)}
-                    placeholder="3000"
-                    className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <span className="text-[10px] text-gray-500">Port aplikasi (misal Next.js=3000, Web=80)</span>
-                </div>
+                {/* Conflict Alert Box */}
+                {portConflictReason && (
+                  <div className="p-3 rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 animate-in fade-in">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                      <span>
+                        Port Host <b>{hostPort}</b> sudah dipakai oleh <b>{portConflictReason}</b>!
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setHostPort(String(recommendedPort))}
+                      className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shrink-0 flex items-center gap-1 shadow-sm self-start sm:self-auto"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" /> Gunakan Port Aman :{recommendedPort}
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Local DNS & Virtual Host Configuration */}
@@ -736,17 +822,20 @@ export function DeployProjectModal({
                 </div>
               </div>
 
-              {/* 1-Click Preset Buttons */}
+              {/* 1-Click Preset Buttons (Safe Non-Colliding Presets) */}
               <div className="space-y-1.5">
-                <span className="text-[11px] font-medium text-gray-400">Rekomendasi Port Populer:</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-medium text-gray-400">Rekomendasi Port Bebas Konflik:</span>
+                  <span className="text-[10px] text-emerald-400 font-semibold">✨ Host Port Aman Otomatis</span>
+                </div>
                 <div className="flex flex-wrap gap-2 text-xs">
                   {[
-                    { label: 'Next.js / Node (3000:3000)', hp: '3000', cp: '3000' },
-                    { label: 'FastAPI / Python (8000:8000)', hp: '8000', cp: '8000' },
-                    { label: 'Web / PHP (8080:80)', hp: '8080', cp: '80' },
-                    { label: 'Express (4000:4000)', hp: '4000', cp: '4000' },
-                    { label: 'Flask (5000:5000)', hp: '5000', cp: '5000' },
-                    { label: 'Standard HTTP (80:80)', hp: '80', cp: '80' },
+                    { label: `Next.js / Node (:${recommendedPort} -> :3000)`, hp: String(recommendedPort), cp: '3000' },
+                    { label: `FastAPI / Python (:${recommendedPort} -> :8000)`, hp: String(recommendedPort), cp: '8000' },
+                    { label: `PHP / Laravel (:${recommendedPort} -> :80)`, hp: String(recommendedPort), cp: '80' },
+                    { label: `Express (:${recommendedPort} -> :4000)`, hp: String(recommendedPort), cp: '4000' },
+                    { label: `Python Flask (:${recommendedPort} -> :5000)`, hp: String(recommendedPort), cp: '5000' },
+                    { label: `Vite / React (:${recommendedPort} -> :80)`, hp: String(recommendedPort), cp: '80' },
                   ].map((preset) => (
                     <button
                       key={preset.label}
