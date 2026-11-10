@@ -116,6 +116,8 @@ class TrafficBroadcaster:
     def _classify_sub_target(self, path: str) -> Optional[str]:
         if path.startswith("/api/v1/stock") or "/nfc" in path:
             return "mysql"
+        if "/influx" in path or "/telemetry" in path:
+            return "influxdb"
         if path.startswith(("/api/v1/projects", "/api/v1/servers", "/api/v1/auth", "/api/v1/users", "/api/v1/deployments")):
             return "postgres"
         if path.startswith("/api/v1/backups"):
@@ -157,6 +159,8 @@ class TrafficBroadcaster:
             "mysql": "#f59e0b",     # Orange
             "postgres": "#60a5fa",  # Indigo/Blue
             "mqtt": "#06b6d4",      # Cyan
+            "influxdb": "#c084fc",  # Purple TSDB
+            "router": "#38bdf8",    # Sky Blue Ingress
         }
         return colors.get(source, "#3b82f6")
 
@@ -213,3 +217,4 @@ class TrafficBroadcaster:
 
 
 traffic_broadcaster = TrafficBroadcaster()
+

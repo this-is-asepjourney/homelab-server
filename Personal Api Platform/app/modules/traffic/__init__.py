@@ -3,3 +3,4 @@ from app.modules.traffic.broadcaster import traffic_broadcaster
 from app.modules.traffic.router import router
 
 __all__ = ["traffic_broadcaster", "router"]
+

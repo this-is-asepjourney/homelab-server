@@ -84,26 +84,62 @@ async def simulate_api_action(payload: SimulateRequest) -> Dict[str, Any]:
             color="#34d399",
             detail="ESP32 (192.168.25.104) -> POST /api/nfc/tap [UID: 058E208F87A200]",
         )
-        # Follow-up DB verification and relay notification
-        asyncio.create_task(_delay_broadcast(0.35, "core", "mysql", "DB_AUTH", "#fbbf24", "Core -> MySQL :3306 [SELECT user FROM nfc_users]"))
-        asyncio.create_task(_delay_broadcast(0.75, "core", "esp32", "UNLOCKED", "#22d3ee", "Core -> ESP32 [Relay GPIO26 HIGH 2 Jam, Beep 1x]"))
-        asyncio.create_task(_delay_broadcast(0.85, "core", "hub", "FLEET_SYNC", "#34d399", "Core -> HeatpressHub [Operator Ferdiansyah Active]"))
+        # Follow-up DB verification and relay/buzzer feedback
+        asyncio.create_task(_delay_broadcast(0.35, "core", "mysql", "DB_AUTH", "#fbbf24", "Core -> MySQL :3306 [SELECT user FROM nfc_users WHERE uid=...]"))
+        asyncio.create_task(_delay_broadcast(0.70, "core", "esp32", "UNLOCKED", "#22d3ee", "Core -> ESP32 [Relay GPIO26 HIGH 2 Jam, Buzzer Bip 1x]"))
+        asyncio.create_task(_delay_broadcast(0.90, "core", "hub", "FLEET_SYNC", "#34d399", "Core -> HeatpressHub [Operator Ferdiansyah Active]"))
+
+    elif action == "nfc_sync":
+        traffic_broadcaster.record_and_broadcast(
+            method="POST",
+            path="/api/nfc/users",
+            status=201,
+            duration_ms=3.4,
+            client_ip="192.168.25.101:8088",
+            source="hub",
+            target="core",
+            sub_target="mysql",
+            tag="USER_REG",
+            color="#34d399",
+            detail="HeatpressHub Web -> POST /api/nfc/users [UID: 058E208F87A200 Ferdiansyah]",
+        )
+        asyncio.create_task(_delay_broadcast(0.35, "core", "mysql", "MYSQL_WRITE", "#fbbf24", "Core -> MySQL eternal_db [INSERT INTO nfc_users]"))
+        asyncio.create_task(_delay_broadcast(0.70, "core", "esp32", "NVS_PUSH", "#38bdf8", "Core -> ESP32 POST /api/nfc/register_user [Tulis ke Flash NVS]"))
 
     elif action == "telemetry":
         traffic_broadcaster.record_and_broadcast(
-            method="POST",
-            path="/api/devices/telemetry",
+            method="MQTT_PUB",
+            path="/SysCtrl",
             status=200,
             duration_ms=1.4,
             client_ip=payload.client_ip or "192.168.25.104",
             source="esp32",
-            target="core",
-            sub_target="mqtt",
+            target="mqtt",
+            sub_target="influxdb",
             tag="MQTT_PUB",
             color="#38bdf8",
             detail="ESP32 -> Mosquitto :1883 [/SysCtrl {temp: 36.4°C, hum: 37%, rssi: -55dBm}]",
         )
-        asyncio.create_task(_delay_broadcast(0.4, "mqtt", "grafana", "PROM_SCRAPE", "#f43f5e", "Telegraf :9273 -> Prometheus :9001 -> Grafana live chart"))
+        asyncio.create_task(_delay_broadcast(0.35, "mqtt", "core", "MQTT_SUB", "#38bdf8", "Mosquitto :1883 -> Core MqttInfluxConsumer (Async Worker)"))
+        asyncio.create_task(_delay_broadcast(0.65, "core", "influxdb", "INFLUX_WRITE", "#c084fc", "Core -> InfluxDB 2.7 :8086 [bucket=eternal_telemetry, org=homelab]"))
+        asyncio.create_task(_delay_broadcast(0.95, "influxdb", "grafana", "GRAFANA_QUERY", "#ec4899", "Grafana :3001 <- Mixed Flux Query [eternal-iot-dashboard]"))
+
+    elif action == "dns_ingress":
+        traffic_broadcaster.record_and_broadcast(
+            method="DNS_QUERY",
+            path="*.homelab",
+            status=200,
+            duration_ms=0.8,
+            client_ip=payload.client_ip or "192.168.25.105",
+            source="router",
+            target="core",
+            sub_target="hub",
+            tag="DNS_INGRESS",
+            color="#38bdf8",
+            detail="CoreDNS (:53) + Nginx Ingress (:80) -> Resolving iot.homelab to 192.168.25.101",
+        )
+        asyncio.create_task(_delay_broadcast(0.35, "router", "hub", "VHOST_IOT", "#34d399", "Ingress :80 -> ProxyPass to HeatpressHub Web (:8088)"))
+        asyncio.create_task(_delay_broadcast(0.60, "router", "psm", "VHOST_PSM", "#a78bfa", "Ingress :80 -> ProxyPass to PSM Console (:3005)"))
 
     elif action == "stock":
         traffic_broadcaster.record_and_broadcast(
@@ -174,3 +210,4 @@ async def _delay_broadcast(delay: float, source: str, target: str, tag: str, col
         color=color,
         detail=detail,
     )
+

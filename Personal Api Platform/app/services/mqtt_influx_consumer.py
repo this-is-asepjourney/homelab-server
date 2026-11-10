@@ -161,6 +161,25 @@ class MqttInfluxConsumer:
                 )
                 logger.info(f"[MQTT->InfluxDB] Recorded NFC event for {user_name} ({uid}) -> InfluxDB")
 
+                # Broadcast live event to Architecture Map
+                try:
+                    from app.modules.traffic.broadcaster import traffic_broadcaster
+                    traffic_broadcaster.record_and_broadcast(
+                        method="NFC_TAP",
+                        path=topic,
+                        status=200 if status == "granted" else 403,
+                        duration_ms=1.8,
+                        client_ip="192.168.25.104",
+                        source="esp32",
+                        target="core",
+                        sub_target="mysql",
+                        tag="NFC_AUTH",
+                        color="#34d399" if status == "granted" else "#ef4444",
+                        detail=f"ESP32 -> Core -> InfluxDB & MySQL eternal_db [UID: {uid} | {user_name} ({role}) -> {status.upper()}]"
+                    )
+                except Exception:
+                    pass
+
         # 2. Temperature, Humidity & Telemetry Readings
         suhu = data.get("suhu") or data.get("temperature") or data.get("temp")
         hum = data.get("humidity") or data.get("hum") or data.get("kelembapan")
@@ -217,6 +236,25 @@ class MqttInfluxConsumer:
                 is_locked=is_locked,
                 rem_sec=rem_sec,
             )
+
+            # Broadcast live telemetry stream to Architecture Map
+            try:
+                from app.modules.traffic.broadcaster import traffic_broadcaster
+                traffic_broadcaster.record_and_broadcast(
+                    method="MQTT",
+                    path=topic,
+                    status=200,
+                    duration_ms=1.2,
+                    client_ip=str(data.get("ip") or "192.168.25.104"),
+                    source="esp32",
+                    target="mqtt",
+                    sub_target="influxdb",
+                    tag="TELEMETRY",
+                    color="#06b6d4",
+                    detail=f"ESP32 -> Mosquitto {topic} -> InfluxDB :8086 & MySQL :3306 [Suhu: {temp_val}°C, Hum: {hum_val}%]"
+                )
+            except Exception:
+                pass
 
     def _sync_mysql_telemetry(
         self,

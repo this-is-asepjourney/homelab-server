@@ -489,7 +489,7 @@
         <div class="topology-svg-wrapper">
           <canvas id="topology-canvas"></canvas>
           
-          <svg id="topology-svg" viewBox="0 0 1000 480" xmlns="http://www.w3.org/2000/svg">
+          <svg id="topology-svg" viewBox="0 0 1020 500" xmlns="http://www.w3.org/2000/svg">
             <defs>
               <linearGradient id="coreGrad" x1="0%" y1="0%" x2="100%" y2="100%">
                 <stop offset="0%" stop-color="#1e40af"/>
@@ -507,28 +507,54 @@
 
             <!-- CONNECTION LINES (Dashed glow cables) -->
             <g id="svg-paths" stroke="#253556" stroke-width="2" stroke-dasharray="6,6">
-              <!-- Core to ESP32 -->
-              <path id="path-esp32" d="M 500,240 Q 300,120 160,90" />
-              <!-- Core to HeatpressHub -->
-              <path id="path-hub" d="M 500,240 Q 300,240 140,240" />
-              <!-- Core to Stock UMKM -->
-              <path id="path-stock" d="M 500,240 Q 300,360 160,390" />
-              <!-- Core to PSM -->
-              <path id="path-psm" d="M 500,240 Q 680,120 840,90" />
-              <!-- Core to MQTT -->
-              <path id="path-mqtt" d="M 500,240 Q 680,240 860,240" />
-              <!-- Core to Grafana/Prometheus -->
-              <path id="path-grafana" d="M 500,240 Q 680,360 840,390" />
-              <!-- Core to MySQL 8.4 -->
-              <path id="path-mysql" d="M 500,240 Q 420,380 390,420" />
-              <!-- Core to PostgreSQL -->
-              <path id="path-postgres" d="M 500,240 Q 580,380 610,420" />
+              <!-- Router to Core & Apps -->
+              <path id="path-router-core" d="M 510,78 L 510,188" />
+              <path id="path-router-hub" d="M 420,52 Q 260,52 145,207" />
+              <path id="path-router-psm" d="M 600,52 Q 760,52 870,77" />
+              <path id="path-router-grafana" d="M 600,52 Q 780,180 850,405" />
+
+              <!-- Core to ESP32 Hardware -->
+              <path id="path-core-esp32" d="M 510,240 Q 310,130 228,110" />
+              <!-- Core to HeatpressHub Web -->
+              <path id="path-core-hub" d="M 510,240 L 228,240" />
+              <!-- Core to Stock UMKM POS -->
+              <path id="path-core-stock" d="M 510,240 Q 310,340 233,390" />
+
+              <!-- Core to PSM Control Plane -->
+              <path id="path-core-psm" d="M 510,240 Q 710,130 788,110" />
+              <!-- Core to Mosquitto MQTT -->
+              <path id="path-core-mqtt" d="M 510,240 Q 700,230 788,220" />
+              <!-- Core to InfluxDB TSDB -->
+              <path id="path-core-influx" d="M 510,240 Q 700,290 788,325" />
+              <!-- Core to Grafana -->
+              <path id="path-core-grafana" d="M 510,240 Q 690,360 768,435" />
+
+              <!-- Core to MySQL 8.4 Server -->
+              <path id="path-core-mysql" d="M 510,240 Q 430,370 370,407" />
+              <!-- Core to PostgreSQL Server -->
+              <path id="path-core-postgres" d="M 510,240 Q 590,370 650,407" />
+
+              <!-- Direct Inter-Service Pipelines -->
+              <path id="path-esp32-mqtt" d="M 145,77 Q 510,90 788,220" />
+              <path id="path-mqtt-influx" d="M 870,249 L 870,296" />
+              <path id="path-influx-grafana" d="M 870,354 L 850,405" />
+              <path id="path-mysql-grafana" d="M 443,435 Q 640,485 768,435" />
+              <path id="path-mysql-stock" d="M 298,435 Q 230,440 190,423" />
             </g>
 
             <!-- NODES -->
 
+            <!-- 0. INGRESS ROUTER & LOCAL DNS (TOP CENTER) -->
+            <g id="node-router" class="topo-node" transform="translate(510, 52)">
+              <rect x="-90" y="-26" width="180" height="52" rx="10" fill="url(#nodeGrad)" stroke="#38bdf8" stroke-width="2"/>
+              <text x="-76" y="-3" font-size="16">🚪</text>
+              <text x="-52" y="-5" fill="#38bdf8" font-size="10.5" font-weight="800">Ingress :80 &amp; DNS :53</text>
+              <text x="-52" y="8" fill="#cbd5e1" font-size="8">CoreDNS &bull; Nginx Proxy</text>
+              <text x="-52" y="19" fill="#64748b" font-size="7.5" font-family="monospace">*.homelab &bull; *.fa.local</text>
+            </g>
+
             <!-- 1. CENTER HUB: PAP CENTRAL API GATEWAY -->
-            <g id="node-core" class="topo-node" transform="translate(500, 240)">
+            <g id="node-core" class="topo-node" transform="translate(510, 240)">
               <circle r="65" fill="#1e3a8a" opacity="0.3" filter="url(#glowCore)"/>
               <circle r="52" fill="url(#coreGrad)" stroke="#60a5fa" stroke-width="3"/>
               <text y="-14" text-anchor="middle" font-size="22">🛡️</text>
@@ -538,75 +564,84 @@
             </g>
 
             <!-- 2. ESP32 ETERNAL (HARDWARE) -->
-            <g id="node-esp32" class="topo-node" transform="translate(160, 90)">
-              <rect x="-80" y="-35" width="160" height="70" rx="10" fill="url(#nodeGrad)" stroke="#38bdf8" stroke-width="2"/>
-              <text x="-65" y="-12" font-size="18">📟</text>
-              <text x="-40" y="-12" fill="#38bdf8" font-size="11" font-weight="800">ESP32 Eternal</text>
-              <text x="-40" y="3" fill="#cbd5e1" font-size="8.5">NFC + DHT11 + Buzzer</text>
-              <text x="-40" y="18" fill="#64748b" font-size="8" font-family="monospace">192.168.25.104</text>
+            <g id="node-esp32" class="topo-node" transform="translate(145, 110)">
+              <rect x="-82.5" y="-33" width="165" height="66" rx="10" fill="url(#nodeGrad)" stroke="#38bdf8" stroke-width="2"/>
+              <text x="-68" y="-10" font-size="18">📟</text>
+              <text x="-43" y="-10" fill="#38bdf8" font-size="11" font-weight="800">ESP32 Eternal</text>
+              <text x="-43" y="4" fill="#cbd5e1" font-size="8.5">RC522 &bull; DHT11 &bull; Buzzer</text>
+              <text x="-43" y="18" fill="#64748b" font-size="8" font-family="monospace">192.168.25.104</text>
             </g>
 
             <!-- 3. HEATPRESS HUB WEB -->
-            <g id="node-hub" class="topo-node" transform="translate(140, 240)">
-              <rect x="-80" y="-35" width="160" height="70" rx="10" fill="url(#nodeGrad)" stroke="#34d399" stroke-width="2"/>
-              <text x="-65" y="-12" font-size="18">🖥️</text>
-              <text x="-40" y="-12" fill="#34d399" font-size="11" font-weight="800">HeatpressHub Web</text>
-              <text x="-40" y="3" fill="#cbd5e1" font-size="8.5">Fleet &amp; NFC Roles UI</text>
-              <text x="-40" y="18" fill="#64748b" font-size="8" font-family="monospace">Port :8088 / :80</text>
+            <g id="node-hub" class="topo-node" transform="translate(145, 240)">
+              <rect x="-82.5" y="-33" width="165" height="66" rx="10" fill="url(#nodeGrad)" stroke="#34d399" stroke-width="2"/>
+              <text x="-68" y="-10" font-size="18">🖥️</text>
+              <text x="-43" y="-10" fill="#34d399" font-size="11" font-weight="800">HeatpressHub Web</text>
+              <text x="-43" y="4" fill="#cbd5e1" font-size="8.5">Fleet &amp; NFC Roles UI</text>
+              <text x="-43" y="18" fill="#64748b" font-size="8" font-family="monospace">Port :8088 / :80</text>
             </g>
 
             <!-- 4. STOCK UMKM -->
-            <g id="node-stock" class="topo-node" transform="translate(160, 390)">
-              <rect x="-80" y="-35" width="160" height="70" rx="10" fill="url(#nodeGrad)" stroke="#fbbf24" stroke-width="2"/>
-              <text x="-65" y="-12" font-size="18">💼</text>
-              <text x="-40" y="-12" fill="#fbbf24" font-size="11" font-weight="800">Stock UMKM POS</text>
-              <text x="-40" y="3" fill="#cbd5e1" font-size="8.5">Kasir &amp; Inventori</text>
-              <text x="-40" y="18" fill="#64748b" font-size="8" font-family="monospace">DB: stock_umkm</text>
+            <g id="node-stock" class="topo-node" transform="translate(150, 390)">
+              <rect x="-82.5" y="-33" width="165" height="66" rx="10" fill="url(#nodeGrad)" stroke="#fbbf24" stroke-width="2"/>
+              <text x="-68" y="-10" font-size="18">💼</text>
+              <text x="-43" y="-10" fill="#fbbf24" font-size="11" font-weight="800">Stock UMKM POS</text>
+              <text x="-43" y="4" fill="#cbd5e1" font-size="8.5">Kasir &amp; Inventori</text>
+              <text x="-43" y="18" fill="#64748b" font-size="8" font-family="monospace">DB: stock_umkm</text>
             </g>
 
             <!-- 5. PSM CONTROL PLANE -->
-            <g id="node-psm" class="topo-node" transform="translate(840, 90)">
-              <rect x="-80" y="-35" width="160" height="70" rx="10" fill="url(#nodeGrad)" stroke="#a78bfa" stroke-width="2"/>
-              <text x="-65" y="-12" font-size="18">🎛️</text>
-              <text x="-40" y="-12" fill="#a78bfa" font-size="11" font-weight="800">PSM Console</text>
-              <text x="-40" y="3" fill="#cbd5e1" font-size="8.5">Server Management</text>
-              <text x="-40" y="18" fill="#64748b" font-size="8" font-family="monospace">Port :3005</text>
+            <g id="node-psm" class="topo-node" transform="translate(870, 110)">
+              <rect x="-82.5" y="-33" width="165" height="66" rx="10" fill="url(#nodeGrad)" stroke="#a78bfa" stroke-width="2"/>
+              <text x="-68" y="-10" font-size="18">🎛️</text>
+              <text x="-43" y="-10" fill="#a78bfa" font-size="11" font-weight="800">PSM Console</text>
+              <text x="-43" y="4" fill="#cbd5e1" font-size="8.5">Server &amp; Deployments</text>
+              <text x="-43" y="18" fill="#64748b" font-size="8" font-family="monospace">Port :3005</text>
             </g>
 
             <!-- 6. MOSQUITTO MQTT -->
-            <g id="node-mqtt" class="topo-node" transform="translate(860, 240)">
-              <rect x="-80" y="-35" width="160" height="70" rx="10" fill="url(#nodeGrad)" stroke="#60a5fa" stroke-width="2"/>
-              <text x="-65" y="-12" font-size="18">📡</text>
-              <text x="-40" y="-12" fill="#60a5fa" font-size="11" font-weight="800">Mosquitto MQTT</text>
-              <text x="-40" y="3" fill="#cbd5e1" font-size="8.5">Broker SysCtrl &amp; ETL</text>
-              <text x="-40" y="18" fill="#64748b" font-size="8" font-family="monospace">Port :1883</text>
+            <g id="node-mqtt" class="topo-node" transform="translate(870, 220)">
+              <rect x="-82.5" y="-28" width="165" height="56" rx="10" fill="url(#nodeGrad)" stroke="#60a5fa" stroke-width="2"/>
+              <text x="-68" y="-7" font-size="17">📡</text>
+              <text x="-43" y="-7" fill="#60a5fa" font-size="10.5" font-weight="800">Mosquitto MQTT</text>
+              <text x="-43" y="6" fill="#cbd5e1" font-size="8">Broker SysCtrl &amp; IoT</text>
+              <text x="-43" y="17" fill="#64748b" font-size="7.5" font-family="monospace">Port :1883</text>
             </g>
 
-            <!-- 7. GRAFANA & PROMETHEUS -->
-            <g id="node-grafana" class="topo-node" transform="translate(840, 390)">
-              <rect x="-80" y="-35" width="160" height="70" rx="10" fill="url(#nodeGrad)" stroke="#f43f5e" stroke-width="2"/>
-              <text x="-65" y="-12" font-size="18">📊</text>
-              <text x="-40" y="-12" fill="#f43f5e" font-size="11" font-weight="800">Grafana &amp; Prom</text>
-              <text x="-40" y="3" fill="#cbd5e1" font-size="8.5">Visual Telemetry</text>
-              <text x="-40" y="18" fill="#64748b" font-size="8" font-family="monospace">Port :3001 / :9001</text>
+            <!-- 7. INFLUXDB 2.7 TSDB -->
+            <g id="node-influx" class="topo-node" transform="translate(870, 325)">
+              <rect x="-82.5" y="-28" width="165" height="56" rx="10" fill="url(#nodeGrad)" stroke="#c084fc" stroke-width="2"/>
+              <text x="-68" y="-7" font-size="17">⚡</text>
+              <text x="-43" y="-7" fill="#c084fc" font-size="10.5" font-weight="800">InfluxDB 2.7 TSDB</text>
+              <text x="-43" y="6" fill="#cbd5e1" font-size="8">eternal_telemetry</text>
+              <text x="-43" y="17" fill="#64748b" font-size="7.5" font-family="monospace">Port :8086</text>
             </g>
 
-            <!-- 8. MYSQL 8.4 SERVER -->
-            <g id="node-mysql" class="topo-node" transform="translate(390, 420)">
-              <rect x="-70" y="-28" width="140" height="56" rx="8" fill="url(#nodeGrad)" stroke="#f59e0b" stroke-width="1.8"/>
-              <text x="-58" y="-7" font-size="15">🐬</text>
-              <text x="-35" y="-7" fill="#fbbf24" font-size="10" font-weight="800">MySQL 8.4</text>
-              <text x="-35" y="6" fill="#cbd5e1" font-size="7.5">eternal_db &bull; stock_umkm</text>
-              <text x="-35" y="17" fill="#64748b" font-size="7.5" font-family="monospace">:3306</text>
+            <!-- 8. GRAFANA UTAMA -->
+            <g id="node-grafana" class="topo-node" transform="translate(850, 435)">
+              <rect x="-82.5" y="-30" width="165" height="60" rx="10" fill="url(#nodeGrad)" stroke="#f43f5e" stroke-width="2"/>
+              <text x="-68" y="-9" font-size="17">📊</text>
+              <text x="-43" y="-9" fill="#f43f5e" font-size="10.5" font-weight="800">Grafana Utama</text>
+              <text x="-43" y="4" fill="#cbd5e1" font-size="8">Mixed: InfluxDB + MySQL</text>
+              <text x="-43" y="16" fill="#64748b" font-size="7.5" font-family="monospace">Port :3001</text>
             </g>
 
-            <!-- 9. POSTGRESQL SERVER -->
-            <g id="node-postgres" class="topo-node" transform="translate(610, 420)">
-              <rect x="-70" y="-28" width="140" height="56" rx="8" fill="url(#nodeGrad)" stroke="#38bdf8" stroke-width="1.8"/>
-              <text x="-58" y="-7" font-size="15">🐘</text>
-              <text x="-35" y="-7" fill="#38bdf8" font-size="10" font-weight="800">PostgreSQL</text>
-              <text x="-35" y="6" fill="#cbd5e1" font-size="7.5">pap_core &bull; psm</text>
-              <text x="-35" y="17" fill="#64748b" font-size="7.5" font-family="monospace">:5432</text>
+            <!-- 9. MYSQL 8.4 SERVER -->
+            <g id="node-mysql" class="topo-node" transform="translate(370, 435)">
+              <rect x="-72.5" y="-28" width="145" height="56" rx="8" fill="url(#nodeGrad)" stroke="#f59e0b" stroke-width="1.8"/>
+              <text x="-60" y="-7" font-size="15">🐬</text>
+              <text x="-37" y="-7" fill="#fbbf24" font-size="10" font-weight="800">MySQL 8.4</text>
+              <text x="-37" y="6" fill="#cbd5e1" font-size="7.5">eternal_db &bull; stock_umkm</text>
+              <text x="-37" y="17" fill="#64748b" font-size="7.5" font-family="monospace">Port :3306</text>
+            </g>
+
+            <!-- 10. POSTGRESQL SERVER -->
+            <g id="node-postgres" class="topo-node" transform="translate(650, 435)">
+              <rect x="-72.5" y="-28" width="145" height="56" rx="8" fill="url(#nodeGrad)" stroke="#38bdf8" stroke-width="1.8"/>
+              <text x="-60" y="-7" font-size="15">🐘</text>
+              <text x="-37" y="-7" fill="#38bdf8" font-size="10" font-weight="800">PostgreSQL</text>
+              <text x="-37" y="6" fill="#cbd5e1" font-size="7.5">pap_core &bull; psm</text>
+              <text x="-37" y="17" fill="#64748b" font-size="7.5" font-family="monospace">Port :5432</text>
             </g>
 
           </svg>
@@ -622,13 +657,19 @@
               <span>🟢</span> <b>Tap Kartu NFC (ESP32)</b>
             </button>
             <button class="sim-btn sim-btn-cyan" onclick="simulateTelemetryPing()">
-              <span>🔵</span> <b>DHT11 Telemetri (MQTT)</b>
+              <span>🔵</span> <b>DHT11 Telemetri -> InfluxDB</b>
+            </button>
+            <button class="sim-btn sim-btn-purple" onclick="simulateNfcSync()">
+              <span>🟣</span> <b>Daftar User -> Sync NVS</b>
+            </button>
+            <button class="sim-btn sim-btn-emerald" style="background: rgba(6,182,212,0.15); color: #22d3ee; border: 1px solid rgba(6,182,212,0.3);" onclick="simulateDnsIngress()">
+              <span>🌐</span> <b>Ingress :80 &amp; CoreDNS :53</b>
             </button>
             <button class="sim-btn sim-btn-amber" onclick="simulateStockTransaction()">
               <span>🟡</span> <b>Transaksi Stock UMKM</b>
             </button>
-            <button class="sim-btn sim-btn-purple" onclick="simulateRemoteUnlock()">
-              <span>🟣</span> <b>Buka Kunci Remote (Web)</b>
+            <button class="sim-btn sim-btn-purple" onclick="simulatePsmDeploy()">
+              <span>🎛️</span> <b>Deploy Proyek PSM</b>
             </button>
             <button class="sim-btn sim-btn-rose" onclick="simulateBackupTrigger()">
               <span>🔴</span> <b>Trigger Backup Snapshot</b>
@@ -636,21 +677,6 @@
             <button class="sim-btn" style="background: #334155; color: #fff;" onclick="clearTerminalLogs()">
               <span>🧹</span> Bersihkan Log
             </button>
-          </div>
-        </div>
-
-        <!-- REALTIME LOG TERMINAL -->
-        <div>
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
-            <span style="font-size: 0.8rem; font-weight: 700; color: #cbd5e1;">🖥️ Terminal Aliran Paket Komunikasi API (Real-Time Console):</span>
-            <span style="font-size: 0.72rem; color: #64748b;">Auto-scrolling stream &bull; Port :8000</span>
-          </div>
-          <div class="terminal-box" id="terminal-stream">
-            <div class="terminal-row"><span class="log-time">[14:06:50]</span> <span class="log-tag-api">[CORE_READY]</span> Central Gateway PAP Core online di http://192.168.25.101:8000</div>
-            <div class="terminal-row"><span class="log-time">[14:06:52]</span> <span class="log-tag-db">[MYSQL_INIT]</span> Database 'eternal_db' &amp; 'stock_umkm' terhubung (:3306)</div>
-            <div class="terminal-row"><span class="log-time">[14:06:53]</span> <span class="log-tag-db">[PG_INIT]</span> Database 'pap_core' &amp; 'psm' terhubung (:5432)</div>
-            <div class="terminal-row"><span class="log-time">[14:06:55]</span> <span class="log-tag-mqtt">[MQTT_READY]</span> Mosquitto Broker aktif di 192.168.25.101:1883</div>
-            <div class="terminal-row"><span class="log-time">[14:06:58]</span> <span class="log-tag-nfc">[ESP32_LINK]</span> Perangkat Eternal (192.168.25.104) terdeteksi di jaringan</div>
           </div>
         </div>
 
@@ -1122,49 +1148,66 @@
     let sseSource = null;
     let lastFrameTime = performance.now();
 
-    // Node coordinate map matching the exact SVG viewBox (1000 x 480)
+    // Node coordinate map matching the exact SVG viewBox (1020 x 500)
     const NODES = {
-      core:     { x: 500, y: 240, label: "Core API :8000", elId: "node-core" },
-      esp32:    { x: 160, y: 90,  label: "ESP32 Eternal", elId: "node-esp32" },
-      hub:      { x: 140, y: 240, label: "HeatpressHub Web", elId: "node-hub" },
-      stock:    { x: 160, y: 390, label: "Stock UMKM", elId: "node-stock" },
-      psm:      { x: 840, y: 90,  label: "PSM Console", elId: "node-psm" },
-      mqtt:     { x: 860, y: 240, label: "Mosquitto :1883", elId: "node-mqtt" },
-      grafana:  { x: 840, y: 390, label: "Grafana :3001", elId: "node-grafana" },
-      mysql:    { x: 390, y: 420, label: "MySQL :3306", elId: "node-mysql" },
-      postgres: { x: 610, y: 420, label: "PostgreSQL :5432", elId: "node-postgres" }
+      router:   { x: 510, y: 52,  label: "Ingress :80 & DNS :53", elId: "node-router" },
+      core:     { x: 510, y: 240, label: "Core API :8000", elId: "node-core" },
+      esp32:    { x: 145, y: 110, label: "ESP32 Eternal", elId: "node-esp32" },
+      hub:      { x: 145, y: 240, label: "HeatpressHub Web", elId: "node-hub" },
+      stock:    { x: 150, y: 390, label: "Stock UMKM POS", elId: "node-stock" },
+      psm:      { x: 870, y: 110, label: "PSM Console", elId: "node-psm" },
+      mqtt:     { x: 870, y: 220, label: "Mosquitto :1883", elId: "node-mqtt" },
+      influxdb: { x: 870, y: 325, label: "InfluxDB :8086", elId: "node-influx" },
+      grafana:  { x: 850, y: 435, label: "Grafana :3001", elId: "node-grafana" },
+      mysql:    { x: 370, y: 435, label: "MySQL :3306", elId: "node-mysql" },
+      postgres: { x: 650, y: 435, label: "PostgreSQL :5432", elId: "node-postgres" }
     };
 
     // Exact Quadratic Bezier Control Points matching the SVG dashed paths
     const CABLE_ROUTES = {
-      "core-esp32":    { p0: NODES.core, cp: { x: 300, y: 120 }, p1: NODES.esp32 },
-      "esp32-core":    { p0: NODES.esp32, cp: { x: 300, y: 120 }, p1: NODES.core },
+      // Router & Ingress
+      "router-core":    { p0: NODES.router, cp: { x: 510, y: 146 }, p1: NODES.core },
+      "core-router":    { p0: NODES.core, cp: { x: 510, y: 146 }, p1: NODES.router },
+      "router-hub":     { p0: NODES.router, cp: { x: 260, y: 52 }, p1: NODES.hub },
+      "hub-router":     { p0: NODES.hub, cp: { x: 260, y: 52 }, p1: NODES.router },
+      "router-psm":     { p0: NODES.router, cp: { x: 740, y: 52 }, p1: NODES.psm },
+      "psm-router":     { p0: NODES.psm, cp: { x: 740, y: 52 }, p1: NODES.router },
+      "router-grafana": { p0: NODES.router, cp: { x: 780, y: 180 }, p1: NODES.grafana },
 
-      "core-hub":      { p0: NODES.core, cp: { x: 300, y: 240 }, p1: NODES.hub },
-      "hub-core":      { p0: NODES.hub, cp: { x: 300, y: 240 }, p1: NODES.core },
+      // Core to Hardware & Clients
+      "core-esp32":     { p0: NODES.core, cp: { x: 310, y: 130 }, p1: NODES.esp32 },
+      "esp32-core":     { p0: NODES.esp32, cp: { x: 310, y: 130 }, p1: NODES.core },
+      "core-hub":       { p0: NODES.core, cp: { x: 327, y: 240 }, p1: NODES.hub },
+      "hub-core":       { p0: NODES.hub, cp: { x: 327, y: 240 }, p1: NODES.core },
+      "core-stock":     { p0: NODES.core, cp: { x: 310, y: 340 }, p1: NODES.stock },
+      "stock-core":     { p0: NODES.stock, cp: { x: 310, y: 340 }, p1: NODES.core },
+      "core-psm":       { p0: NODES.core, cp: { x: 710, y: 130 }, p1: NODES.psm },
+      "psm-core":       { p0: NODES.psm, cp: { x: 710, y: 130 }, p1: NODES.core },
 
-      "core-stock":    { p0: NODES.core, cp: { x: 300, y: 360 }, p1: NODES.stock },
-      "stock-core":    { p0: NODES.stock, cp: { x: 300, y: 360 }, p1: NODES.core },
+      // Core to Pipelines
+      "core-mqtt":      { p0: NODES.core, cp: { x: 700, y: 230 }, p1: NODES.mqtt },
+      "mqtt-core":      { p0: NODES.mqtt, cp: { x: 700, y: 230 }, p1: NODES.core },
+      "core-influxdb":  { p0: NODES.core, cp: { x: 700, y: 290 }, p1: NODES.influxdb },
+      "influxdb-core":  { p0: NODES.influxdb, cp: { x: 700, y: 290 }, p1: NODES.core },
+      "core-grafana":   { p0: NODES.core, cp: { x: 690, y: 360 }, p1: NODES.grafana },
+      "grafana-core":   { p0: NODES.grafana, cp: { x: 690, y: 360 }, p1: NODES.core },
 
-      "core-psm":      { p0: NODES.core, cp: { x: 680, y: 120 }, p1: NODES.psm },
-      "psm-core":      { p0: NODES.psm, cp: { x: 680, y: 120 }, p1: NODES.core },
+      // Core to Databases
+      "core-mysql":     { p0: NODES.core, cp: { x: 430, y: 370 }, p1: NODES.mysql },
+      "mysql-core":     { p0: NODES.mysql, cp: { x: 430, y: 370 }, p1: NODES.core },
+      "core-postgres":  { p0: NODES.core, cp: { x: 590, y: 370 }, p1: NODES.postgres },
+      "postgres-core":  { p0: NODES.postgres, cp: { x: 590, y: 370 }, p1: NODES.core },
 
-      "core-mqtt":     { p0: NODES.core, cp: { x: 680, y: 240 }, p1: NODES.mqtt },
-      "mqtt-core":     { p0: NODES.mqtt, cp: { x: 680, y: 240 }, p1: NODES.core },
-
-      "core-grafana":  { p0: NODES.core, cp: { x: 680, y: 360 }, p1: NODES.grafana },
-      "grafana-core":  { p0: NODES.grafana, cp: { x: 680, y: 360 }, p1: NODES.core },
-
-      "core-mysql":    { p0: NODES.core, cp: { x: 420, y: 380 }, p1: NODES.mysql },
-      "mysql-core":    { p0: NODES.mysql, cp: { x: 420, y: 380 }, p1: NODES.core },
-
-      "core-postgres": { p0: NODES.core, cp: { x: 580, y: 380 }, p1: NODES.postgres },
-      "postgres-core": { p0: NODES.postgres, cp: { x: 580, y: 380 }, p1: NODES.core },
-
-      // Cross routes
-      "mqtt-grafana":  { p0: NODES.mqtt, cp: { x: 850, y: 315 }, p1: NODES.grafana },
-      "mysql-stock":   { p0: NODES.mysql, cp: { x: 275, y: 405 }, p1: NODES.stock },
-      "postgres-psm":  { p0: NODES.postgres, cp: { x: 725, y: 255 }, p1: NODES.psm }
+      // Cross routes & Direct Pipelines
+      "esp32-mqtt":     { p0: NODES.esp32, cp: { x: 510, y: 90 }, p1: NODES.mqtt },
+      "mqtt-esp32":     { p0: NODES.mqtt, cp: { x: 510, y: 90 }, p1: NODES.esp32 },
+      "mqtt-influxdb":  { p0: NODES.mqtt, cp: { x: 870, y: 272 }, p1: NODES.influxdb },
+      "influxdb-mqtt":  { p0: NODES.influxdb, cp: { x: 870, y: 272 }, p1: NODES.mqtt },
+      "influxdb-grafana":{ p0: NODES.influxdb, cp: { x: 860, y: 380 }, p1: NODES.grafana },
+      "grafana-influxdb":{ p0: NODES.grafana, cp: { x: 860, y: 380 }, p1: NODES.influxdb },
+      "mysql-grafana":  { p0: NODES.mysql, cp: { x: 640, y: 485 }, p1: NODES.grafana },
+      "mysql-stock":    { p0: NODES.mysql, cp: { x: 260, y: 440 }, p1: NODES.stock },
+      "postgres-psm":   { p0: NODES.postgres, cp: { x: 770, y: 270 }, p1: NODES.psm }
     };
 
     function resizeCanvas() {
@@ -1317,8 +1360,8 @@
       lastFrameTime = currentTime;
 
       const rect = canvas.getBoundingClientRect();
-      const scaleX = rect.width / 1000;
-      const scaleY = rect.height / 480;
+      const scaleX = rect.width / 1020;
+      const scaleY = rect.height / 500;
 
       ctx.clearRect(0, 0, rect.width, rect.height);
 
@@ -1504,9 +1547,14 @@
 
       // Spawn primary particle from source to target
       spawnPacket(data.source || 'hub', data.target || 'core', data.color || '#3b82f6', badgeLabel, 1.25, () => {
-        // If sub-target exists (e.g. core -> mysql or core -> postgres), trigger secondary hop!
+        // If sub-target exists (e.g. core -> mysql or core -> postgres or mqtt -> influxdb), trigger secondary hop!
         if (data.sub_target && data.sub_target !== data.target) {
-          spawnPacket(data.target || 'core', data.sub_target, data.color || '#3b82f6', data.tag || 'DB_SYNC', 1.35);
+          spawnPacket(data.target || 'core', data.sub_target, data.color || '#3b82f6', data.tag || 'DB_SYNC', 1.35, () => {
+            // If sub-target was influxdb, trigger downstream visual query to grafana
+            if (data.sub_target === 'influxdb') {
+              spawnPacket('influxdb', 'grafana', '#ec4899', 'FLUX_QUERY', 1.45);
+            }
+          });
         }
       });
 
@@ -1560,11 +1608,19 @@
       triggerSimAction('telemetry');
     }
 
+    function simulateNfcSync() {
+      triggerSimAction('nfc_sync');
+    }
+
+    function simulateDnsIngress() {
+      triggerSimAction('dns_ingress');
+    }
+
     function simulateStockTransaction() {
       triggerSimAction('stock');
     }
 
-    function simulateRemoteUnlock() {
+    function simulatePsmDeploy() {
       triggerSimAction('psm_deploy');
     }
 
@@ -1589,7 +1645,7 @@
     function startAutoSimulation() {
       if (autoSimInterval) clearInterval(autoSimInterval);
       autoSimInterval = setInterval(() => {
-        const actions = ['nfc_tap', 'telemetry', 'stock'];
+        const actions = ['nfc_tap', 'telemetry', 'nfc_sync', 'dns_ingress', 'stock', 'psm_deploy'];
         const chosen = actions[Math.floor(Math.random() * actions.length)];
         triggerSimAction(chosen);
       }, 4000);
