@@ -217,6 +217,17 @@ class ProjectCreate(BaseModel):
     environment_variables: Optional[List[EnvironmentVariableItem]] = None
     auto_deploy: bool = True
 
+class DockerfileGenerateRequest(BaseModel):
+    framework: str = "Next.js"
+    port: Optional[int] = 3000
+    project_name: Optional[str] = None
+    template_key: Optional[str] = None
+
+class DockerfileUpdateRequest(BaseModel):
+    dockerfile: str
+    dockerignore: Optional[str] = None
+    dockerfile_path: Optional[str] = "Dockerfile"
+
 class ProjectDatabaseProvisionRequest(BaseModel):
     db_name: Optional[str] = None
     db_type: Optional[str] = None  # postgres, mysql, sqlite, none

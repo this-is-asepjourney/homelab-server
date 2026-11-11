@@ -20,6 +20,8 @@ from apps.api.app.schemas.all_schemas import (
     ProjectUpdate,
     ProjectResponse,
     ProjectDatabaseProvisionRequest,
+    DockerfileGenerateRequest,
+    DockerfileUpdateRequest,
     EnvironmentUpdateRequest,
     EnvironmentItemResponse,
     DeploymentResponse,
@@ -218,15 +220,14 @@ async def create_project(
     # Register Local DNS & Ingress Routing
     if project.domain:
         try:
-            # pyrefly: ignore[missing-import]
-            from app.modules.dns.service import DnsService
+            from apps.api.app.services.pap_client import sync_domain_routing
             hp = 3000
             if project.port_mappings and ":" in project.port_mappings:
                 try:
                     hp = int(project.port_mappings.split(":")[0].strip())
                 except Exception:
                     hp = 3000
-            DnsService.register_domain_route(domain=project.domain, target_port=hp, project_name=project.name)
+            sync_domain_routing(domain=project.domain, target_port=hp, project_name=project.name)
         except Exception:
             pass
 
@@ -406,6 +407,20 @@ def update_project(
 
     db.commit()
     db.refresh(p)
+
+    # Sync DNS & Ingress Routing if domain or ports changed
+    if p.domain and (payload.port_mappings is not None or payload.domain is not None):
+        try:
+            from apps.api.app.services.pap_client import sync_domain_routing
+            hp = 3000
+            if p.port_mappings and ":" in p.port_mappings:
+                try:
+                    hp = int(p.port_mappings.split(":")[0].strip())
+                except Exception:
+                    hp = 3000
+            sync_domain_routing(domain=p.domain, target_port=hp, project_name=p.name)
+        except Exception:
+            pass
 
     log_activity(
         db,
@@ -781,5 +796,220 @@ def restart_project_container_endpoint(
         "success": True,
         "message": f"Container '{matched.get('name')}' berhasil di-restart.",
     }
+
+
+def _resolve_project_workspace_dir(project_id: str) -> str:
+    import os
+    from apps.api.app.core.config import settings
+
+    candidates = [
+        os.path.join(settings.STORAGE_BASE_DIR, "psm", "workspaces", project_id),
+        os.path.join("./storage/psm/workspaces", project_id),
+        os.path.join("./storage/workspaces", project_id),
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    return candidates[0]
+
+
+@router.get("/dockerfile/templates")
+def get_dockerfile_templates_endpoint():
+    """List all available professional multi-stage Dockerfile templates."""
+    from apps.agent.app.deployment.dockerfile_generator import get_available_templates
+    return {
+        "success": True,
+        "templates": get_available_templates(),
+    }
+
+
+@router.post("/dockerfile/generate")
+def generate_dockerfile_preview_endpoint(payload: DockerfileGenerateRequest):
+    """Generate professional Dockerfile and .dockerignore for a framework & port."""
+    from apps.agent.app.deployment.dockerfile_generator import (
+        generate_dockerfile,
+        generate_dockerignore,
+        TEMPLATES,
+    )
+    tmpl_key = payload.template_key
+    if not tmpl_key:
+        fw_clean = (payload.framework or "").lower()
+        if "next" in fw_clean:
+            tmpl_key = "nextjs"
+        elif "vite" in fw_clean or "react" in fw_clean or "vue" in fw_clean:
+            tmpl_key = "vite_spa"
+        elif "fastapi" in fw_clean:
+            tmpl_key = "fastapi"
+        elif "django" in fw_clean:
+            tmpl_key = "django"
+        elif "flask" in fw_clean:
+            tmpl_key = "flask"
+        elif "laravel" in fw_clean or "php" in fw_clean:
+            tmpl_key = "laravel"
+        elif "go" in fw_clean:
+            tmpl_key = "golang"
+        elif "static" in fw_clean or "html" in fw_clean:
+            tmpl_key = "static_html"
+        else:
+            tmpl_key = "node_backend"
+
+    port = payload.port or TEMPLATES.get(tmpl_key, {}).get("default_port", 3000)
+    df_content = generate_dockerfile(tmpl_key, port=port, project_name=payload.project_name)
+    di_content = generate_dockerignore()
+
+    return {
+        "success": True,
+        "template_key": tmpl_key,
+        "template_name": TEMPLATES.get(tmpl_key, {}).get("name", "Custom"),
+        "dockerfile": df_content,
+        "dockerignore": di_content,
+        "recommended_port": port,
+    }
+
+
+@router.get("/{project_id}/dockerfile")
+def get_project_dockerfile_endpoint(
+    project_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Retrieve existing or auto-generated Dockerfile and .dockerignore for this project."""
+    import os
+    p = db.query(Project).filter(Project.id == project_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    from apps.agent.app.deployment.dockerfile_generator import (
+        generate_dockerfile,
+        generate_dockerignore,
+        detect_project_stack,
+        TEMPLATES,
+    )
+
+    ws_dir = _resolve_project_workspace_dir(project_id)
+    df_rel = p.source.dockerfile_path if p.source and p.source.dockerfile_path else "Dockerfile"
+    full_df = os.path.join(ws_dir, df_rel)
+    full_di = os.path.join(ws_dir, ".dockerignore")
+
+    df_content = ""
+    di_content = ""
+    exists = False
+    is_generated = False
+
+    # Check if files physically exist in project workspace
+    if os.path.exists(full_df):
+        try:
+            with open(full_df, "r", encoding="utf-8", errors="ignore") as f:
+                df_content = f.read()
+            exists = True
+        except Exception:
+            pass
+
+    if os.path.exists(full_di):
+        try:
+            with open(full_di, "r", encoding="utf-8", errors="ignore") as f:
+                di_content = f.read()
+        except Exception:
+            pass
+
+    # If no Dockerfile yet, auto-generate high-performance preview
+    if not df_content:
+        is_generated = True
+        stack_info = detect_project_stack(ws_dir) if os.path.exists(ws_dir) else {}
+        tmpl_key = stack_info.get("template_key")
+        if not tmpl_key:
+            fw_clean = (p.framework or "").lower()
+            if "next" in fw_clean:
+                tmpl_key = "nextjs"
+            elif "vite" in fw_clean or "react" in fw_clean or "vue" in fw_clean:
+                tmpl_key = "vite_spa"
+            elif "fastapi" in fw_clean:
+                tmpl_key = "fastapi"
+            elif "django" in fw_clean:
+                tmpl_key = "django"
+            elif "flask" in fw_clean:
+                tmpl_key = "flask"
+            elif "laravel" in fw_clean or "php" in fw_clean:
+                tmpl_key = "laravel"
+            elif "go" in fw_clean:
+                tmpl_key = "golang"
+            elif "static" in fw_clean or "html" in fw_clean:
+                tmpl_key = "static_html"
+            else:
+                tmpl_key = "node_backend"
+
+        port = 3000
+        if p.port_mappings and ":" in p.port_mappings:
+            try:
+                port = int(p.port_mappings.split(":")[-1].split(",")[0].strip())
+            except Exception:
+                port = 3000
+
+        df_content = generate_dockerfile(tmpl_key, port=port, project_name=p.name)
+
+    if not di_content:
+        di_content = generate_dockerignore()
+
+    return {
+        "success": True,
+        "project_id": p.id,
+        "project_name": p.name,
+        "framework": p.framework,
+        "dockerfile_path": df_rel,
+        "dockerfile": df_content,
+        "dockerignore": di_content,
+        "exists": exists,
+        "is_generated": is_generated,
+        "workspace_exists": os.path.exists(ws_dir),
+    }
+
+
+@router.put("/{project_id}/dockerfile")
+def update_project_dockerfile_endpoint(
+    project_id: str,
+    payload: DockerfileUpdateRequest,
+    current_user: User = Depends(require_role("owner", "admin", "operator")),
+    db: Session = Depends(get_db),
+):
+    """Write or update Dockerfile & .dockerignore directly in the project workspace."""
+    import os
+    p = db.query(Project).filter(Project.id == project_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    ws_dir = _resolve_project_workspace_dir(project_id)
+    os.makedirs(ws_dir, exist_ok=True)
+
+    target_rel = payload.dockerfile_path or (p.source.dockerfile_path if p.source else "Dockerfile") or "Dockerfile"
+    full_df = os.path.join(ws_dir, target_rel)
+    os.makedirs(os.path.dirname(full_df), exist_ok=True)
+
+    with open(full_df, "w", encoding="utf-8", newline="\n") as f:
+        f.write(payload.dockerfile)
+
+    if payload.dockerignore is not None:
+        full_di = os.path.join(ws_dir, ".dockerignore")
+        with open(full_di, "w", encoding="utf-8", newline="\n") as f:
+            f.write(payload.dockerignore)
+
+    if p.source:
+        p.source.dockerfile_path = target_rel
+        db.commit()
+
+    log_activity(
+        db,
+        action="project.dockerfile_update",
+        resource_type="project",
+        resource_id=project_id,
+        user_id=current_user.id,
+        details={"project": p.name, "dockerfile_path": target_rel},
+    )
+
+    return {
+        "success": True,
+        "message": f"Dockerfile berhasil disimpan ke workspace project ('{target_rel}').",
+        "dockerfile_path": target_rel,
+    }
+
 
 

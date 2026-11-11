@@ -19,6 +19,8 @@ import {
   ArrowRight,
   ArrowLeft,
   CheckCircle2,
+  Check,
+  Copy,
   Layers,
   FileCode,
   ExternalLink,
@@ -107,6 +109,34 @@ export function DeployProjectModal({
   const [deployStatusText, setDeployStatusText] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
+  // Dockerfile Setup Assistant state
+  const [showDockerfilePreview, setShowDockerfilePreview] = useState(false);
+  const [previewDockerfile, setPreviewDockerfile] = useState('');
+  const [previewDockerignore, setPreviewDockerignore] = useState('');
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [copiedPreview, setCopiedPreview] = useState(false);
+  const [previewSubTab, setPreviewSubTab] = useState<'dockerfile' | 'dockerignore'>('dockerfile');
+
+  const handleOpenDockerfilePreview = async () => {
+    try {
+      setLoadingPreview(true);
+      setShowDockerfilePreview(true);
+      const res = await api.generateDockerfilePreview({
+        framework,
+        port: parseInt(containerPort, 10) || 3000,
+        project_name: name || 'my-app',
+      });
+      if (res && res.dockerfile) {
+        setPreviewDockerfile(res.dockerfile);
+        setPreviewDockerignore(res.dockerignore || '');
+      }
+    } catch (e: any) {
+      setPreviewDockerfile(`# Error: ${e.message}`);
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
   // Auto-discover next available free port on target server
   useEffect(() => {
     let mounted = true;
@@ -187,12 +217,15 @@ export function DeployProjectModal({
       applyPortPreset(safeHp, '3000');
     } else if (fw === 'FastAPI' || fw === 'Django / Python') {
       applyPortPreset(safeHp, '8000');
+      setDbType('postgres');
     } else if (fw === 'Laravel' || fw === 'PHP') {
-      applyPortPreset(safeHp, '80');
+      applyPortPreset(safeHp, '8080');
+      setDbType('mysql');
     } else if (fw === 'Flask') {
       applyPortPreset(safeHp, '5000');
     } else if (fw === 'Static HTML') {
       applyPortPreset(safeHp, '80');
+      setDbType('none');
     }
   };
 
@@ -630,23 +663,49 @@ export function DeployProjectModal({
                 </div>
 
                 <div className="sm:col-span-2">
-                  <label className="block text-xs font-medium text-foreground mb-1">Framework / Stack Preset</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-medium text-foreground">Framework / Stack Preset</label>
+                    <button
+                      type="button"
+                      onClick={handleOpenDockerfilePreview}
+                      className="text-xs text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1 transition-colors"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Preview Dockerfile ({framework})</span>
+                    </button>
+                  </div>
                   <select
                     value={framework}
                     onChange={(e) => handleFrameworkChange(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground text-xs"
                   >
-                    <option value="Next.js">Next.js (Port 3000)</option>
-                    <option value="Node.js">Node.js / Express / Nest (Port 3000 / 4000)</option>
+                    <option value="Next.js">Next.js (Port 3000 — Multi-stage Standalone)</option>
+                    <option value="React / Vite">React / Vite / Vue (Port 80 — SPA Nginx Alpine)</option>
+                    <option value="Node.js">Node.js / Express / NestJS (Port 3000)</option>
                     <option value="FastAPI">Python FastAPI / Uvicorn (Port 8000)</option>
-                    <option value="Laravel">Laravel / PHP (Port 8080 / 80)</option>
+                    <option value="Django / Python">Python Django / Gunicorn (Port 8000)</option>
+                    <option value="Laravel">Laravel / PHP (Port 8080)</option>
                     <option value="Flask">Python Flask (Port 5000)</option>
+                    <option value="Go">Go / Golang (Port 8080 — Ultra-light Alpine)</option>
                     <option value="Static HTML">Static HTML / Nginx (Port 80)</option>
                     <option value="Docker Compose">Docker Compose (Stack Specification)</option>
                   </select>
-                  <p className="text-[11px] text-gray-500 mt-1">
-                    💡 PSM otomatis memeriksa Dockerfile. Jika belum ada di project Anda, PSM akan otomatis membuat Dockerfile optimal untuk stack {framework}!
-                  </p>
+                  <div className="mt-2.5 p-3 rounded-lg border border-indigo-500/20 bg-indigo-500/5 flex items-center justify-between gap-3 text-[11px]">
+                    <div className="flex items-center gap-2 text-gray-300">
+                      <FileCode className="w-4 h-4 text-indigo-400 shrink-0" />
+                      <span>
+                        PSM otomatis menambahkan Dockerfile multi-stage production & .dockerignore untuk <strong>{framework}</strong>.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleOpenDockerfilePreview}
+                      className="px-2.5 py-1 rounded bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 font-medium whitespace-nowrap transition-colors flex items-center gap-1"
+                    >
+                      <Eye className="w-3 h-3" />
+                      <span>Lihat Dockerfile</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1153,6 +1212,26 @@ export function DeployProjectModal({
                     {dbType !== 'none' ? `✓ Database ${dbType.toUpperCase()} Terhubung Otomatis` : 'Standalone Stateless Container'}
                   </div>
                 </div>
+
+                <div className="p-3.5 rounded-xl border border-indigo-500/20 bg-indigo-500/5 sm:col-span-2 flex items-center justify-between text-xs">
+                  <div>
+                    <span className="text-indigo-400 text-[11px] font-semibold flex items-center gap-1.5">
+                      <FileCode className="w-3.5 h-3.5" />
+                      <span>Docker Build Strategy (PaaS Standard)</span>
+                    </span>
+                    <div className="text-gray-300 text-xs mt-0.5">
+                      Otomatis multi-stage build, non-root user ({framework}), dan proteksi context <code>.dockerignore</code>.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleOpenDockerfilePreview}
+                    className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition-colors flex items-center gap-1.5 shrink-0"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>Lihat Dockerfile</span>
+                  </button>
+                </div>
               </div>
 
               {/* Progress Callout when deploying */}
@@ -1237,6 +1316,95 @@ export function DeployProjectModal({
           </div>
         </div>
       </div>
+
+      {/* Dockerfile Preview Modal */}
+      {showDockerfilePreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-card border border-border rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between p-4 border-b border-border bg-background">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                  <FileCode className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm text-foreground">Dockerfile Setup Assistant</h4>
+                  <p className="text-[11px] text-gray-500">Preview Dockerfile multi-stage production untuk stack {framework}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDockerfilePreview(false)}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-foreground hover:bg-card transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 flex-1 overflow-y-auto space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewSubTab('dockerfile')}
+                    className={`px-3 py-1 rounded-lg text-xs font-mono font-medium ${
+                      previewSubTab === 'dockerfile'
+                        ? 'bg-indigo-600/15 text-indigo-400 border border-indigo-500/30'
+                        : 'text-gray-400 hover:text-foreground'
+                    }`}
+                  >
+                    Dockerfile
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewSubTab('dockerignore')}
+                    className={`px-3 py-1 rounded-lg text-xs font-mono font-medium ${
+                      previewSubTab === 'dockerignore'
+                        ? 'bg-indigo-600/15 text-indigo-400 border border-indigo-500/30'
+                        : 'text-gray-400 hover:text-foreground'
+                    }`}
+                  >
+                    .dockerignore
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const text = previewSubTab === 'dockerfile' ? previewDockerfile : previewDockerignore;
+                    navigator.clipboard.writeText(text);
+                    setCopiedPreview(true);
+                    setTimeout(() => setCopiedPreview(false), 2000);
+                  }}
+                  className="px-2.5 py-1 rounded-md border border-border text-xs text-gray-300 hover:text-foreground hover:bg-background flex items-center gap-1 transition-colors"
+                >
+                  {copiedPreview ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedPreview ? 'Tersalin' : 'Salin Kode'}</span>
+                </button>
+              </div>
+
+              <div className="relative rounded-xl border border-border bg-[#0d1117] p-3.5 overflow-x-auto text-xs font-mono text-gray-300 max-h-[380px]">
+                {loadingPreview ? (
+                  <div className="py-12 text-center text-gray-500">Memuat konfigurasi Dockerfile...</div>
+                ) : (
+                  <pre className="leading-relaxed whitespace-pre font-mono">
+                    {previewSubTab === 'dockerfile' ? previewDockerfile : previewDockerignore}
+                  </pre>
+                )}
+              </div>
+            </div>
+
+            <div className="p-3 border-t border-border bg-background flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowDockerfilePreview(false)}
+                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold"
+              >
+                Tutup Preview
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

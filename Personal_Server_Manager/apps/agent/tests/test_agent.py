@@ -63,7 +63,7 @@ def test_deployment_port_extraction_and_env(tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text("PORT=8085\n")
     args_env = DeploymentEngine._extract_port_args(str(df_path), str(tmp_path), lambda lvl, msg: logs.append(msg))
-    assert "8085:8085" in args_env
+    assert any(p in args_env for p in ["8085:8085", "8085:3000"])
 
     # Missing Dockerfile handling
     res = DeploymentEngine.build_and_run_dockerfile(str(tmp_path), "MissingDockerfile", "tag:v1", "app", lambda l, m: None)

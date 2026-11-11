@@ -236,7 +236,29 @@ server {{
 
     @classmethod
     def reload_router(cls) -> None:
-        """Attempts to signal the router container to reload its configuration."""
+        """Attempts to signal the router container to reload its configuration.
+        Tries unix socket at /var/run/docker.sock directly first (works inside containers
+        without docker CLI), then falls back to subprocess docker CLI.
+        """
+        # 1. Direct Docker daemon Unix Socket (Fast & zero-dependency)
+        socket_path = "/var/run/docker.sock"
+        if os.path.exists(socket_path):
+            for cname in ["homelab_router", "homelab-router"]:
+                try:
+                    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    s.settimeout(2.0)
+                    s.connect(socket_path)
+                    req = f"POST /containers/{cname}/kill?signal=HUP HTTP/1.1\r\nHost: localhost\r\n\r\n"
+                    s.sendall(req.encode("utf-8"))
+                    res = s.recv(1024)
+                    s.close()
+                    if b"204" in res or b"200" in res:
+                        logger.info("Router %s reloaded successfully via docker.sock", cname)
+                        return
+                except Exception as ex:
+                    logger.debug("Socket reload attempt for %s failed: %s", cname, ex)
+
+        # 2. Subprocess fallback
         for cname in ["homelab_router", "homelab-router"]:
             try:
                 res = subprocess.run(
@@ -246,6 +268,7 @@ server {{
                     timeout=3,
                 )
                 if res.returncode == 0:
+                    logger.info("Router %s reloaded successfully via CLI", cname)
                     break
             except Exception:
                 pass

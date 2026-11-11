@@ -353,6 +353,39 @@ export const api = {
     return res.json();
   },
 
+  // Dockerfile Setup Assistant & Management
+  async getDockerfileTemplates() {
+    const res = await fetchWithAuth('/api/v1/projects/dockerfile/templates');
+    return res.ok ? res.json() : { success: false, templates: {} };
+  },
+
+  async generateDockerfilePreview(payload: { framework: string; port?: number; project_name?: string; template_key?: string }) {
+    const res = await fetchWithAuth('/api/v1/projects/dockerfile/generate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error('Failed to generate Dockerfile preview');
+    return res.json();
+  },
+
+  async getProjectDockerfile(projectId: string) {
+    const res = await fetchWithAuth(`/api/v1/projects/${projectId}/dockerfile`);
+    if (!res.ok) throw new Error('Failed to fetch project Dockerfile');
+    return res.json();
+  },
+
+  async updateProjectDockerfile(projectId: string, data: { dockerfile: string; dockerignore?: string; dockerfile_path?: string }) {
+    const res = await fetchWithAuth(`/api/v1/projects/${projectId}/dockerfile`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to update project Dockerfile');
+    }
+    return res.json();
+  },
+
   // Deployments
   async getDeployments() {
     const res = await fetchWithAuth('/api/v1/deployments');

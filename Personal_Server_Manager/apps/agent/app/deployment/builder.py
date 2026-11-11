@@ -5,6 +5,12 @@ import subprocess
 import re
 import time
 from typing import Callable, Optional, Dict, Any, List, Tuple
+from apps.agent.app.deployment.dockerfile_generator import (
+    ensure_dockerfile_and_ignore,
+    generate_dockerignore,
+    detect_project_stack,
+    generate_dockerfile,
+)
 
 
 class DeploymentEngine:
@@ -69,11 +75,73 @@ class DeploymentEngine:
             f.write("\n".join(lines) + "\n")
 
     @staticmethod
+    def _auto_wire_silo_storage(
+        project_name: str,
+        merged_env: Dict[str, str],
+        env_example_hint: Dict[str, str],
+        log_callback: Callable[[str, str], None],
+    ) -> None:
+        """
+        Automatically configures Silo (MinIO) S3 object storage for projects that use S3 or cloud storage.
+        Ensures bucket exists in MinIO with download permissions.
+        """
+        has_s3_hint = (
+            merged_env.get("FILESYSTEM_DISK") == "s3"
+            or env_example_hint.get("FILESYSTEM_DISK") == "s3"
+            or "AWS_BUCKET" in merged_env
+            or "AWS_BUCKET" in env_example_hint
+            or "AWS_ACCESS_KEY_ID" in env_example_hint
+            or "AWS_ENDPOINT" in env_example_hint
+        )
+        if not has_s3_hint:
+            return
+
+        clean_bucket = re.sub(r"[^a-z0-9-]", "-", project_name.lower().strip()).strip("-")
+        minio_host = os.getenv("HOST_IP", "192.168.25.101")
+        minio_port = os.getenv("MINIO_PORT", "9000")
+        target_bucket = env_example_hint.get("AWS_BUCKET") or merged_env.get("AWS_BUCKET") or clean_bucket
+        if not target_bucket:
+            target_bucket = clean_bucket
+
+        silo_vars = {
+            "FILESYSTEM_DISK": "s3",
+            "AWS_ACCESS_KEY_ID": os.getenv("MINIO_ROOT_USER", "admin"),
+            "AWS_SECRET_ACCESS_KEY": os.getenv("MINIO_ROOT_PASSWORD", "admin12345"),
+            "AWS_DEFAULT_REGION": "us-east-1",
+            "AWS_BUCKET": target_bucket,
+            "AWS_ENDPOINT": env_example_hint.get("AWS_ENDPOINT") or merged_env.get("AWS_ENDPOINT") or f"http://{minio_host}:{minio_port}",
+            "AWS_URL": env_example_hint.get("AWS_URL") or merged_env.get("AWS_URL") or f"http://{minio_host}:{minio_port}/{target_bucket}",
+            "AWS_USE_PATH_STYLE_ENDPOINT": "true",
+        }
+        for k, v in silo_vars.items():
+            if k not in merged_env or not merged_env.get(k):
+                merged_env[k] = v
+
+        # Attempt to auto-create bucket in MinIO / Silo
+        try:
+            import docker
+            client = docker.from_env()
+            for mc_cand in ["homelab_minio_init", "homelab_minio", "minio"]:
+                try:
+                    mcont = client.containers.get(mc_cand)
+                    if mcont.status == "running":
+                        cmd = f"mc mb myminio/{target_bucket} --ignore-existing && mc anonymous set download myminio/{target_bucket}"
+                        mcont.exec_run(["sh", "-c", cmd])
+                        break
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        log_callback("info", f"[Storage] Auto-wired Silo / MinIO S3 bucket '{target_bucket}' ({minio_host}:{minio_port}).")
+
+    @staticmethod
     def ensure_project_db(
         project_name: str,
         env_vars: Optional[Dict[str, str]],
         db_config: Optional[Dict[str, Any]],
         log_callback: Callable[[str, str], None],
+        workspace_dir: Optional[str] = None,
     ) -> Dict[str, str]:
         """
         Unified multi-database provisioner & auto-connect helper for deployed projects.
@@ -85,11 +153,40 @@ class DeploymentEngine:
         """
         merged_env = dict(env_vars or {})
         cfg = dict(db_config or {})
-        db_type = (cfg.get("db_type") or merged_env.get("DB_CONNECTION") or "postgres").lower().strip()
+
+        # Inspect workspace .env.example to detect project's native database preference
+        env_example_hint: Dict[str, str] = {}
+        if workspace_dir:
+            ex_path = os.path.join(workspace_dir, ".env.example")
+            if os.path.exists(ex_path):
+                try:
+                    with open(ex_path, "r", encoding="utf-8", errors="ignore") as f:
+                        for raw_line in f:
+                            line = raw_line.strip()
+                            if line and not line.startswith("#") and "=" in line:
+                                k, v = line.split("=", 1)
+                                env_example_hint[k.strip()] = v.strip()
+                except Exception:
+                    pass
+
+        # Determine target db_type
+        explicit_db_type = cfg.get("db_type")
+        if not explicit_db_type or explicit_db_type in ("postgres", "default", "auto", ""):
+            if "DB_CONNECTION" in merged_env and merged_env["DB_CONNECTION"]:
+                db_type = merged_env["DB_CONNECTION"].lower().strip()
+            elif "DB_CONNECTION" in env_example_hint and env_example_hint["DB_CONNECTION"]:
+                db_type = env_example_hint["DB_CONNECTION"].lower().strip()
+            elif "MYSQL_DATABASE" in env_example_hint or "MYSQL_HOST" in cfg:
+                db_type = "mysql"
+            else:
+                db_type = explicit_db_type or "postgres"
+        else:
+            db_type = explicit_db_type.lower().strip()
 
         # 1. Stateless / None
         if db_type in ("none", "stateless", "false"):
             log_callback("info", "[Database] Mode stateless — project berjalan tanpa database.")
+            DeploymentEngine._auto_wire_silo_storage(project_name, merged_env, env_example_hint, log_callback)
             return merged_env
 
         # 2. SQLite
@@ -100,6 +197,7 @@ class DeploymentEngine:
             merged_env["DB_DATABASE"] = sqlite_file
             merged_env["DATABASE_URL"] = f"sqlite:////{sqlite_file}"
             log_callback("info", f"[SQLite] Konfigurasi database SQLite embedded disiapkan ({sqlite_file}).")
+            DeploymentEngine._auto_wire_silo_storage(project_name, merged_env, env_example_hint, log_callback)
             return merged_env
 
         # 3. MySQL / MariaDB
@@ -108,21 +206,24 @@ class DeploymentEngine:
                 cfg.get("db_name")
                 or merged_env.get("MYSQL_DATABASE")
                 or merged_env.get("DB_DATABASE")
+                or env_example_hint.get("DB_DATABASE")
+                or env_example_hint.get("MYSQL_DATABASE")
                 or project_name
             )
-            my_user = cfg.get("user") or os.getenv("MYSQL_USER") or merged_env.get("DB_USERNAME") or "appuser"
-            my_pass = cfg.get("password") or os.getenv("MYSQL_PASSWORD") or merged_env.get("DB_PASSWORD") or "admin12345"
+            my_user = cfg.get("user") or os.getenv("MYSQL_USER") or merged_env.get("DB_USERNAME") or env_example_hint.get("DB_USERNAME") or "appuser"
+            my_pass = cfg.get("password") or os.getenv("MYSQL_PASSWORD") or merged_env.get("DB_PASSWORD") or env_example_hint.get("DB_PASSWORD") or "admin12345"
             my_port = str(cfg.get("port") or os.getenv("MYSQL_PORT") or 3306)
-            my_host = cfg.get("host") or os.getenv("MYSQL_HOST") or os.getenv("STOCK_DB_HOST") or "192.168.25.101"
+            my_host = cfg.get("host") or os.getenv("MYSQL_HOST") or os.getenv("HOST_IP") or "192.168.25.101"
 
-            # Auto-create MySQL database if host is reachable
+            # Auto-create MySQL database if not exists
+            db_verified = False
             try:
                 import pymysql
                 m_conn = pymysql.connect(
                     host=my_host,
                     port=int(my_port),
-                    user=my_user,
-                    password=my_pass,
+                    user="root",
+                    password=os.getenv("MYSQL_ROOT_PASSWORD", "adminroot12345"),
                     connect_timeout=3
                 )
                 m_cur = m_conn.cursor()
@@ -136,9 +237,32 @@ class DeploymentEngine:
                 m_conn.commit()
                 m_cur.close()
                 m_conn.close()
-                log_callback("info", f"[MySQL] Database '{target_db}' aktif & terverifikasi di MySQL Server ({my_host}:{my_port}).")
-            except Exception as me:
-                log_callback("info", f"[MySQL] Menyiapkan parameter koneksi ke database '{target_db}' ({my_host}:{my_port}).")
+                db_verified = True
+                log_callback("info", f"[MySQL] Database '{target_db}' diverifikasi via PyMySQL ({my_host}:{my_port}).")
+            except Exception:
+                pass
+
+            # Fallback via Docker container exec
+            if not db_verified:
+                try:
+                    import docker
+                    client = docker.from_env()
+                    for c_candidate in ["homelab-mysql", "homelab_mysql", "mysql"]:
+                        try:
+                            mysql_cont = client.containers.get(c_candidate)
+                            if mysql_cont.status == "running":
+                                root_pw = os.getenv("MYSQL_ROOT_PASSWORD", "adminroot12345")
+                                sql = f"CREATE DATABASE IF NOT EXISTS `{target_db}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; CREATE USER IF NOT EXISTS '{my_user}'@'%' IDENTIFIED BY '{my_pass}'; GRANT ALL PRIVILEGES ON `{target_db}`.* TO '{my_user}'@'%'; FLUSH PRIVILEGES;"
+                                cmd = f'mysql -uroot -p"{root_pw}" -e "{sql}"'
+                                c_res = mysql_cont.exec_run(["sh", "-c", cmd])
+                                if c_res.exit_code == 0:
+                                    db_verified = True
+                                    log_callback("info", f"[MySQL] Database '{target_db}' aktif & diverifikasi via container '{c_candidate}'.")
+                                break
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
 
             conn_url = f"mysql+pymysql://{my_user}:{my_pass}@{my_host}:{my_port}/{target_db}"
             std_url = f"mysql://{my_user}:{my_pass}@{my_host}:{my_port}/{target_db}"
@@ -166,10 +290,13 @@ class DeploymentEngine:
                     merged_env[k] = v
 
             log_callback("info", f"[MySQL] Auto-connected project ke MySQL database '{target_db}'.")
+            DeploymentEngine._auto_wire_silo_storage(project_name, merged_env, env_example_hint, log_callback)
             return merged_env
 
         # 4. PostgreSQL (Default)
-        return DeploymentEngine.ensure_project_postgres_db(project_name, env_vars, db_config, log_callback)
+        pg_res = DeploymentEngine.ensure_project_postgres_db(project_name, merged_env, db_config, log_callback)
+        DeploymentEngine._auto_wire_silo_storage(project_name, pg_res, env_example_hint, log_callback)
+        return pg_res
 
     @staticmethod
     def ensure_project_postgres_db(
@@ -211,17 +338,17 @@ class DeploymentEngine:
             or "psm_super_secret_password_change_in_production"
         )
         pg_port = int(cfg.get("port") or os.getenv("POSTGRES_PORT") or 5432)
-        configured_host = cfg.get("host") or os.getenv("POSTGRES_HOST") or "psm-postgres"
+        configured_host = cfg.get("host") or os.getenv("POSTGRES_HOST") or os.getenv("HOST_IP") or "192.168.25.101"
 
         db_verified = False
         db_created = False
-        resolved_container_host = "psm-postgres"
+        resolved_container_host = configured_host if configured_host not in ("127.0.0.1", "localhost") else os.getenv("HOST_IP", "192.168.25.101")
 
         # 2. Method A: Direct PostgreSQL connection via psycopg2
         try:
             import psycopg2
             candidate_hosts = []
-            for h in [configured_host, "postgres", "psm-postgres", "host.docker.internal", "127.0.0.1"]:
+            for h in [configured_host, os.getenv("HOST_IP", "192.168.25.101"), "homelab-postgres", "host.docker.internal", "127.0.0.1"]:
                 if h and h not in candidate_hosts:
                     candidate_hosts.append(h)
 
@@ -271,8 +398,8 @@ class DeploymentEngine:
                             pg_user = user
                             pg_pass = pw
                             resolved_container_host = (
-                                "psm-postgres"
-                                if host in ("postgres", "psm-postgres", "127.0.0.1", "localhost")
+                                os.getenv("HOST_IP", "192.168.25.101")
+                                if host in ("127.0.0.1", "localhost")
                                 else host
                             )
                             db_verified = True
@@ -282,30 +409,35 @@ class DeploymentEngine:
         except Exception:
             pass
 
-        # 3. Method B: Fallback via Docker container 'psm-postgres' (exec psql inside container)
+        # 3. Method B: Fallback via Docker container (exec psql inside container)
         if not db_verified:
             try:
                 import docker
                 client = docker.from_env()
-                pg_cont = client.containers.get("psm-postgres")
-                if pg_cont.status == "running":
-                    chk_cmd = f"psql -U {pg_user} -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname='{target_db}'\""
-                    exit_code, output = pg_cont.exec_run(["sh", "-c", chk_cmd])
-                    out_str = output.decode("utf-8", errors="ignore").strip() if output else ""
-                    if exit_code == 0 and "1" in out_str:
-                        db_verified = True
-                        resolved_container_host = "psm-postgres"
-                    else:
-                        log_callback(
-                            "info",
-                            f"[PostgreSQL] Membuat database '{target_db}' di dalam container psm-postgres...",
-                        )
-                        create_cmd = f'psql -U {pg_user} -d postgres -c \'CREATE DATABASE "{target_db}";\''
-                        c_code, _ = pg_cont.exec_run(["sh", "-c", create_cmd])
-                        if c_code == 0:
-                            db_verified = True
-                            db_created = True
-                            resolved_container_host = "psm-postgres"
+                for pg_c_name in ["homelab-postgres", "homelab_postgres", "psm-postgres", "postgres"]:
+                    try:
+                        pg_cont = client.containers.get(pg_c_name)
+                        if pg_cont.status == "running":
+                            chk_cmd = f"psql -U {pg_user} -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname='{target_db}'\""
+                            exit_code, output = pg_cont.exec_run(["sh", "-c", chk_cmd])
+                            out_str = output.decode("utf-8", errors="ignore").strip() if output else ""
+                            if exit_code == 0 and "1" in out_str:
+                                db_verified = True
+                                resolved_container_host = os.getenv("HOST_IP", "192.168.25.101")
+                            else:
+                                log_callback(
+                                    "info",
+                                    f"[PostgreSQL] Membuat database '{target_db}' di dalam container {pg_c_name}...",
+                                )
+                                create_cmd = f'psql -U {pg_user} -d postgres -c \'CREATE DATABASE "{target_db}";\''
+                                c_code, _ = pg_cont.exec_run(["sh", "-c", create_cmd])
+                                if c_code == 0:
+                                    db_verified = True
+                                    db_created = True
+                                    resolved_container_host = os.getenv("HOST_IP", "192.168.25.101")
+                            break
+                    except Exception:
+                        pass
             except Exception:
                 pass
 
@@ -349,7 +481,9 @@ class DeploymentEngine:
         }
 
         for k, v in pg_vars.items():
-            if k not in merged_env or not merged_env.get(k):
+            if k == "DB_CONNECTION":
+                merged_env[k] = "pgsql"
+            elif k not in merged_env or not merged_env.get(k):
                 merged_env[k] = v
 
         return merged_env
@@ -360,26 +494,41 @@ class DeploymentEngine:
         dockerfile_path: str,
         log_callback: Callable[[str, str], None],
     ) -> None:
+        """Alias for backward-compatibility with tests."""
+        DeploymentEngine.prepare_dockerfile_environment(
+            workspace_dir=workspace_dir,
+            dockerfile_path=dockerfile_path,
+            log_callback=log_callback,
+            db_type="postgres",
+        )
+
+    @staticmethod
+    def prepare_dockerfile_environment(
+        workspace_dir: str,
+        dockerfile_path: str,
+        log_callback: Callable[[str, str], None],
+        db_type: str = "auto",
+    ) -> None:
         """
         1. Normalize line endings (CRLF -> LF) on .sh scripts in workspace_dir.
-        2. If Dockerfile is a PHP image missing pdo_pgsql, auto-inject libpq-dev and pdo_pgsql
-           so PHP/Laravel projects can connect to PostgreSQL out-of-the-box.
+        2. Ensure required database drivers are present in PHP Dockerfiles based on active db_type.
         """
         # 1. Normalize shell script line endings
         try:
-            for fname in os.listdir(workspace_dir):
-                if fname.endswith(".sh"):
-                    fpath = os.path.join(workspace_dir, fname)
-                    if os.path.isfile(fpath):
-                        with open(fpath, "rb") as f:
-                            raw = f.read()
-                        if b"\r\n" in raw:
-                            with open(fpath, "wb") as f:
-                                f.write(raw.replace(b"\r\n", b"\n"))
+            for root, _, files in os.walk(workspace_dir):
+                for fname in files:
+                    if fname.endswith(".sh"):
+                        fpath = os.path.join(root, fname)
+                        if os.path.isfile(fpath):
+                            with open(fpath, "rb") as f:
+                                raw = f.read()
+                            if b"\r\n" in raw:
+                                with open(fpath, "wb") as f:
+                                    f.write(raw.replace(b"\r\n", b"\n"))
         except Exception:
             pass
 
-        # 2. Check Dockerfile for PHP without pdo_pgsql
+        # 2. Check Dockerfile for PHP database drivers
         full_df_path = os.path.join(workspace_dir, dockerfile_path)
         if not os.path.exists(full_df_path):
             return
@@ -388,31 +537,56 @@ class DeploymentEngine:
             with open(full_df_path, "r", encoding="utf-8", errors="ignore") as f:
                 content = f.read()
 
-            if "docker-php-ext-install" in content and "pdo_pgsql" not in content:
-                log_callback(
-                    "info",
-                    "[PostgreSQL] Mendeteksi Dockerfile PHP tanpa driver 'pdo_pgsql' — menginjeksi libpq-dev & pdo_pgsql secara otomatis...",
-                )
-                # Inject libpq-dev and pdo_pgsql right after existing docker-php-ext-install or before ENTRYPOINT/CMD
-                pg_layer = (
-                    "\n# Auto-injected by Personal Server Manager for PostgreSQL connectivity\n"
-                    "RUN apt-get update && apt-get install -y --no-install-recommends libpq-dev postgresql-client \\\n"
-                    "    && docker-php-ext-install pdo_pgsql pgsql \\\n"
-                    "    && rm -rf /var/lib/apt/lists/*\n"
-                )
-                if "ENTRYPOINT" in content:
-                    idx = content.rfind("ENTRYPOINT")
-                    content = content[:idx] + pg_layer + "\n" + content[idx:]
-                elif "EXPOSE" in content:
-                    idx = content.rfind("EXPOSE")
-                    content = content[:idx] + pg_layer + "\n" + content[idx:]
-                else:
-                    content = content + "\n" + pg_layer
+            if "docker-php-ext-install" in content:
+                # If PostgreSQL is selected and pdo_pgsql is missing
+                if db_type == "postgres" and "pdo_pgsql" not in content:
+                    log_callback(
+                        "info",
+                        "[Docker-Build] Menginjeksi driver 'pdo_pgsql' ke Dockerfile PHP untuk koneksi PostgreSQL...",
+                    )
+                    pg_layer = (
+                        "\n# Auto-injected by Personal Server Manager for PostgreSQL connectivity\n"
+                        "RUN apt-get update && apt-get install -y --no-install-recommends libpq-dev postgresql-client \\\n"
+                        "    && docker-php-ext-install pdo_pgsql pgsql \\\n"
+                        "    && rm -rf /var/lib/apt/lists/*\n"
+                    )
+                    if "ENTRYPOINT" in content:
+                        idx = content.rfind("ENTRYPOINT")
+                        content = content[:idx] + pg_layer + "\n" + content[idx:]
+                    elif "EXPOSE" in content:
+                        idx = content.rfind("EXPOSE")
+                        content = content[:idx] + pg_layer + "\n" + content[idx:]
+                    else:
+                        content = content + "\n" + pg_layer
 
-                with open(full_df_path, "w", encoding="utf-8", newline="\n") as f:
-                    f.write(content)
+                    with open(full_df_path, "w", encoding="utf-8", newline="\n") as f:
+                        f.write(content)
+
+                # If MySQL is selected and pdo_mysql is missing
+                elif db_type in ("mysql", "mariadb") and "pdo_mysql" not in content:
+                    log_callback(
+                        "info",
+                        "[Docker-Build] Menginjeksi driver 'pdo_mysql' ke Dockerfile PHP untuk koneksi MySQL...",
+                    )
+                    my_layer = (
+                        "\n# Auto-injected by Personal Server Manager for MySQL connectivity\n"
+                        "RUN apt-get update && apt-get install -y --no-install-recommends default-mysql-client \\\n"
+                        "    && docker-php-ext-install pdo_mysql mysqli \\\n"
+                        "    && rm -rf /var/lib/apt/lists/*\n"
+                    )
+                    if "ENTRYPOINT" in content:
+                        idx = content.rfind("ENTRYPOINT")
+                        content = content[:idx] + my_layer + "\n" + content[idx:]
+                    elif "EXPOSE" in content:
+                        idx = content.rfind("EXPOSE")
+                        content = content[:idx] + my_layer + "\n" + content[idx:]
+                    else:
+                        content = content + "\n" + my_layer
+
+                    with open(full_df_path, "w", encoding="utf-8", newline="\n") as f:
+                        f.write(content)
         except Exception as e:
-            log_callback("warning", f"[PostgreSQL] Dockerfile inspection note: {e}")
+            log_callback("warning", f"[Docker-Build] Dockerfile inspection note: {e}")
 
     @staticmethod
     def run_post_deploy_db_migrations(
@@ -421,48 +595,85 @@ class DeploymentEngine:
         log_callback: Callable[[str, str], None],
     ) -> None:
         """
-        Automatically run database schema migrations inside the newly launched container
-        when standard framework migration tools (e.g., Laravel artisan) are detected.
+        Automatically run database schema migrations, optimizations, and symlinks inside the newly launched container.
         """
         sanitized_name = re.sub(r"[^a-zA-Z0-9_.-]", "-", container_name.lower())
         artisan_path = os.path.join(workspace_dir, "artisan")
+        manage_py_path = os.path.join(workspace_dir, "manage.py")
+        prisma_path = os.path.join(workspace_dir, "prisma")
 
+        # Give the container process 3s to initialize
+        time.sleep(3)
+
+        # 1. Laravel Project
         if os.path.exists(artisan_path):
-            log_callback("info", f"[PostgreSQL] Mendeteksi project Laravel — menjalankan 'php artisan migrate --force' pada database...")
-            time.sleep(2)
-            docker_bin = shutil.which("docker") or "/usr/bin/docker"
-            if os.path.exists(docker_bin) or shutil.which("docker"):
-                try:
-                    proc = subprocess.run(
-                        [docker_bin, "exec", sanitized_name, "php", "artisan", "migrate", "--force"],
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        timeout=60,
-                    )
-                    for line in (proc.stdout or "").splitlines():
-                        if line.strip():
-                            log_callback("info", f"[Migrate] {line.strip()}")
-                    if proc.returncode == 0:
-                        log_callback("info", "[PostgreSQL] Migrasi tabel database Laravel selesai dengan sukses!")
-                    return
-                except Exception:
-                    pass
-
-            # SDK fallback for exec
+            log_callback("info", "[Post-Deploy] Mendeteksi framework Laravel — Menjalankan migrasi, storage link, dan optimasi cache...")
             try:
                 import docker
                 client = docker.from_env()
                 cont = client.containers.get(sanitized_name)
-                exit_code, output = cont.exec_run(["php", "artisan", "migrate", "--force"])
-                if output:
-                    for line in output.decode("utf-8", errors="ignore").splitlines():
+
+                # Migration
+                code, out = cont.exec_run(["php", "artisan", "migrate", "--force"])
+                if out:
+                    for line in out.decode("utf-8", errors="ignore").splitlines():
                         if line.strip():
                             log_callback("info", f"[Migrate] {line.strip()}")
-                if exit_code == 0:
-                    log_callback("info", "[PostgreSQL] Migrasi tabel database selesai dengan sukses!")
+                if code == 0:
+                    log_callback("info", "[Post-Deploy] Migrasi tabel database Laravel berhasil!")
+                else:
+                    log_callback("warning", f"[Post-Deploy] Artisan migrate exit code: {code}")
+
+                # Storage Symlink
+                s_code, s_out = cont.exec_run(["php", "artisan", "storage:link"])
+                if s_out:
+                    for line in s_out.decode("utf-8", errors="ignore").splitlines():
+                        if line.strip():
+                            log_callback("info", f"[StorageLink] {line.strip()}")
+
+                # Optimization Cache
+                cont.exec_run(["php", "artisan", "optimize:clear"])
+                cont.exec_run(["php", "artisan", "optimize"])
+
+                # Storage Permissions
+                cont.exec_run(["sh", "-c", "chown -R www-data:www-data storage bootstrap/cache 2>/dev/null || chmod -R 775 storage bootstrap/cache 2>/dev/null"])
+                log_callback("info", "[Post-Deploy] Konfigurasi runtime Laravel selesai dengan sukses!")
+                return
             except Exception as e:
-                log_callback("warning", f"[PostgreSQL] Post-deploy migration note: {e}")
+                log_callback("warning", f"[Post-Deploy] Laravel post-deploy error: {e}")
+
+        # 2. Django Project
+        elif os.path.exists(manage_py_path):
+            log_callback("info", "[Post-Deploy] Mendeteksi framework Django — Menjalankan 'python manage.py migrate'...")
+            try:
+                import docker
+                client = docker.from_env()
+                cont = client.containers.get(sanitized_name)
+                code, out = cont.exec_run(["python", "manage.py", "migrate", "--noinput"])
+                if out:
+                    for line in out.decode("utf-8", errors="ignore").splitlines():
+                        if line.strip():
+                            log_callback("info", f"[Migrate] {line.strip()}")
+                cont.exec_run(["python", "manage.py", "collectstatic", "--noinput"])
+                return
+            except Exception as e:
+                log_callback("warning", f"[Post-Deploy] Django post-deploy error: {e}")
+
+        # 3. Node.js / Prisma
+        elif os.path.exists(prisma_path):
+            log_callback("info", "[Post-Deploy] Mendeteksi schema Prisma — Menjalankan 'npx prisma migrate deploy'...")
+            try:
+                import docker
+                client = docker.from_env()
+                cont = client.containers.get(sanitized_name)
+                code, out = cont.exec_run(["npx", "prisma", "migrate", "deploy"])
+                if out:
+                    for line in out.decode("utf-8", errors="ignore").splitlines():
+                        if line.strip():
+                            log_callback("info", f"[Migrate] {line.strip()}")
+                return
+            except Exception as e:
+                log_callback("warning", f"[Post-Deploy] Prisma post-deploy error: {e}")
 
     @staticmethod
     def clone_or_pull_git(
@@ -573,18 +784,57 @@ class DeploymentEngine:
         log_callback: Callable[[str, str], None]
     ) -> Tuple[List[str], Dict[str, int], int]:
         """
-        Parses port configuration with priority:
-        1. Explicit port_mappings string (e.g. '8080:3000', '8080:80, 8443:443', '3000')
-        2. Environment variables (HOST_PORT, PORT)
-        3. EXPOSE instruction in Dockerfile
-        4. Default 3000:3000
+        Parses port configuration with multi-layer intelligence:
+        1. Inspects Dockerfile EXPOSE instructions or server config (Apache/Nginx/framework)
+           to determine the true port the application listens on.
+        2. If explicit_mappings is given (e.g. '3101:3000'), detects if container port (3000)
+           was a default placeholder that conflicts with what the Dockerfile actually exposes (e.g. 8080 or 80),
+           and intelligently aligns the container port.
+        3. Sets accurate Host -> Container mappings for Docker CLI and SDK.
         """
         cli_args: List[str] = []
         sdk_ports: Dict[str, int] = {}
-        primary_container_port = 3000
+
+        # 1. Inspect Dockerfile for EXPOSE ports
+        detected_exposed_ports: List[int] = []
+        if full_df_path and os.path.exists(full_df_path):
+            try:
+                with open(full_df_path, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read()
+                    for m in re.finditer(r"EXPOSE\s+([0-9\s]+)", content, re.IGNORECASE):
+                        for port_item in m.group(1).split():
+                            if port_item.strip().isdigit():
+                                detected_exposed_ports.append(int(port_item.strip()))
+            except Exception:
+                pass
+
+        # 2. Inspect workspace configuration files (Apache ports.conf, nginx.conf)
+        if not detected_exposed_ports and workspace_dir:
+            for pth in ["ports.conf", "etc/apache2/ports.conf", "nginx.conf", "default.conf", "docker/nginx.conf"]:
+                full_p = os.path.join(workspace_dir, pth)
+                if os.path.exists(full_p):
+                    try:
+                        with open(full_p, "r", encoding="utf-8", errors="ignore") as f:
+                            for pm in re.findall(r"Listen\s+(\d+)", f.read(), re.IGNORECASE):
+                                detected_exposed_ports.append(int(pm))
+                    except Exception:
+                        pass
+
+        # Framework default fallback guess
+        framework_default_port = 3000
+        if workspace_dir:
+            if os.path.exists(os.path.join(workspace_dir, "composer.json")) or os.path.exists(os.path.join(workspace_dir, "artisan")):
+                framework_default_port = 8080 if 8080 in detected_exposed_ports else (80 if 80 in detected_exposed_ports else 8000)
+            elif os.path.exists(os.path.join(workspace_dir, "requirements.txt")) or any(os.path.exists(os.path.join(workspace_dir, f)) for f in ("main.py", "app.py", "manage.py")):
+                framework_default_port = 8000
+            elif os.path.exists(os.path.join(workspace_dir, "index.html")) and not os.path.exists(os.path.join(workspace_dir, "package.json")):
+                framework_default_port = 80
+
+        primary_target_cp = detected_exposed_ports[0] if detected_exposed_ports else framework_default_port
+        primary_container_port = primary_target_cp
         parsed_any = False
 
-        # 1. Explicit port mappings
+        # 3. Process explicit mappings with intelligent alignment
         if explicit_mappings and str(explicit_mappings).strip():
             raw_entries = [p.strip() for p in str(explicit_mappings).split(",") if p.strip()]
             for entry in raw_entries:
@@ -592,13 +842,26 @@ class DeploymentEngine:
                 try:
                     if len(parts) == 1:
                         hp = int(parts[0])
-                        cp = hp
-                    elif len(parts) == 2:
+                        cp = primary_target_cp
+                    elif len(parts) >= 2:
                         hp = int(parts[0])
                         cp = int(parts[1])
-                    elif len(parts) >= 3:
-                        hp = int(parts[-2])
-                        cp = int(parts[-1])
+
+                        # INTELLIGENT ALIGNMENT:
+                        # If container port was submitted as 3000 (standard UI default) but Dockerfile
+                        # explicitly exposes a different primary port (e.g. 8080 or 80):
+                        if cp == 3000 and detected_exposed_ports and (3000 not in detected_exposed_ports):
+                            log_callback(
+                                "info",
+                                f"[Docker-Port] Penyesuaian cerdas: Dockerfile mengekspos port {primary_target_cp} (bukan 3000). Memetakan Host {hp} -> Container {primary_target_cp}."
+                            )
+                            cp = primary_target_cp
+                        elif detected_exposed_ports and (cp not in detected_exposed_ports) and len(detected_exposed_ports) == 1:
+                            log_callback(
+                                "info",
+                                f"[Docker-Port] Menyelaraskan port container dari {cp} ke {detected_exposed_ports[0]} sesuai EXPOSE Dockerfile."
+                            )
+                            cp = detected_exposed_ports[0]
                     else:
                         continue
 
@@ -607,11 +870,11 @@ class DeploymentEngine:
                     if not parsed_any:
                         primary_container_port = cp
                     parsed_any = True
-                    log_callback("info", f"[Docker] Port Mapping: Host {hp} -> Container {cp}")
+                    log_callback("info", f"[Docker-Port] Port Mapping: Host {hp} -> Container {cp}")
                 except ValueError:
                     continue
 
-        # 2. Check .env for PORT or HOST_PORT
+        # 4. Check .env for PORT or HOST_PORT
         if not parsed_any:
             env_dict = DeploymentEngine._load_env_dict(workspace_dir)
             p_val = env_dict.get("HOST_PORT") or env_dict.get("PORT")
@@ -622,38 +885,30 @@ class DeploymentEngine:
                         hp, cp = int(hp_str), int(cp_str)
                     else:
                         hp = int(p_val)
-                        cp = hp
+                        cp = primary_target_cp
                     cli_args.extend(["-p", f"{hp}:{cp}"])
                     sdk_ports[f"{cp}/tcp"] = hp
                     primary_container_port = cp
                     parsed_any = True
-                    log_callback("info", f"[Docker] Port dari konfigurasi .env: Host {hp} -> Container {cp}")
+                    log_callback("info", f"[Docker-Port] Port dari .env: Host {hp} -> Container {cp}")
                 except ValueError:
                     pass
 
-        # 3. Check Dockerfile EXPOSE
-        if not parsed_any and os.path.exists(full_df_path):
-            try:
-                with open(full_df_path, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read()
-                    matches = re.findall(r"EXPOSE\s+(\d+)", content, re.IGNORECASE)
-                    for port in matches:
-                        p = int(port)
-                        cli_args.extend(["-p", f"{p}:{p}"])
-                        sdk_ports[f"{p}/tcp"] = p
-                        if not parsed_any:
-                            primary_container_port = p
-                        parsed_any = True
-                        log_callback("info", f"[Docker] Terdeteksi EXPOSE {p} pada Dockerfile: Host {p} -> Container {p}")
-            except Exception:
-                pass
+        # 5. Check Dockerfile EXPOSE
+        if not parsed_any and detected_exposed_ports:
+            for p in detected_exposed_ports:
+                cli_args.extend(["-p", f"{p}:{p}"])
+                sdk_ports[f"{p}/tcp"] = p
+            primary_container_port = detected_exposed_ports[0]
+            parsed_any = True
+            log_callback("info", f"[Docker-Port] Terdeteksi EXPOSE {primary_container_port} pada Dockerfile: Host {primary_container_port} -> Container {primary_container_port}")
 
-        # 4. Fallback default
+        # 6. Fallback default
         if not parsed_any:
-            cli_args.extend(["-p", "3000:3000"])
-            sdk_ports["3000/tcp"] = 3000
-            primary_container_port = 3000
-            log_callback("info", "[Docker] Port default: Mapping Host 3000 -> Container 3000")
+            cli_args.extend(["-p", f"{primary_target_cp}:{primary_target_cp}"])
+            sdk_ports[f"{primary_target_cp}/tcp"] = primary_target_cp
+            primary_container_port = primary_target_cp
+            log_callback("info", f"[Docker-Port] Port default otomatis: Mapping Host {primary_container_port} -> Container {primary_container_port}")
 
         return cli_args, sdk_ports, primary_container_port
 
@@ -664,123 +919,25 @@ class DeploymentEngine:
         compose_path: str,
         container_port: int,
         log_callback: Callable[[str, str], None],
+        fallback_framework: str = "auto",
     ) -> str:
         """
         Ensure workspace has a buildable Dockerfile or Docker Compose file.
-        If missing, detect project type and auto-generate an optimized Dockerfile.
+        If missing, detect project type and auto-generate an optimized, production-ready
+        multi-stage Dockerfile and .dockerignore like modern PaaS platforms (Railway, Coolify, Render).
         """
         full_compose = os.path.join(workspace_dir, compose_path)
         if os.path.exists(full_compose):
             return compose_path
 
-        full_df = os.path.join(workspace_dir, dockerfile_path)
-        if os.path.exists(full_df):
-            return dockerfile_path
-
-        root_df = os.path.join(workspace_dir, "Dockerfile")
-        if os.path.exists(root_df):
-            return "Dockerfile"
-
-        # Detect tech stack
-        detected_fw = "Generic Web App"
-        generated_content = ""
-
-        pkg_json = os.path.join(workspace_dir, "package.json")
-        req_txt = os.path.join(workspace_dir, "requirements.txt")
-        py_files = [f for f in ("main.py", "app.py", "manage.py") if os.path.exists(os.path.join(workspace_dir, f))]
-        composer_json = os.path.join(workspace_dir, "composer.json")
-        index_html = os.path.join(workspace_dir, "index.html")
-
-        if os.path.exists(pkg_json):
-            is_next = False
-            try:
-                with open(pkg_json, "r", encoding="utf-8", errors="ignore") as f:
-                    raw_pkg = f.read().lower()
-                    if '"next"' in raw_pkg:
-                        is_next = True
-            except Exception:
-                pass
-
-            if is_next:
-                detected_fw = "Next.js"
-                generated_content = (
-                    "FROM node:20-alpine\n"
-                    "WORKDIR /app\n"
-                    "COPY package*.json ./\n"
-                    "RUN npm install --legacy-peer-deps\n"
-                    "COPY . .\n"
-                    f"ENV PORT={container_port}\n"
-                    "ENV NODE_ENV=production\n"
-                    "RUN npm run build || true\n"
-                    f"EXPOSE {container_port}\n"
-                    "CMD [\"npm\", \"start\"]\n"
-                )
-            else:
-                detected_fw = "Node.js"
-                generated_content = (
-                    "FROM node:20-alpine\n"
-                    "WORKDIR /app\n"
-                    "COPY package*.json ./\n"
-                    "RUN npm install --legacy-peer-deps\n"
-                    "COPY . .\n"
-                    f"ENV PORT={container_port}\n"
-                    f"EXPOSE {container_port}\n"
-                    "CMD [\"npm\", \"start\"]\n"
-                )
-        elif os.path.exists(req_txt) or py_files:
-            detected_fw = "Python"
-            cmd_line = f"python -m uvicorn main:app --host 0.0.0.0 --port {container_port}" if "main.py" in py_files else (f"python app.py" if "app.py" in py_files else f"python -m http.server {container_port}")
-            generated_content = (
-                "FROM python:3.11-slim\n"
-                "WORKDIR /app\n"
-                "RUN apt-get update && apt-get install -y --no-install-recommends libpq-dev gcc build-essential curl && rm -rf /var/lib/apt/lists/*\n"
-                "COPY requirements.txt* ./\n"
-                "RUN if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi\n"
-                "COPY . .\n"
-                f"ENV PORT={container_port}\n"
-                f"EXPOSE {container_port}\n"
-                f"CMD [\"sh\", \"-c\", \"{cmd_line}\"]\n"
-            )
-        elif os.path.exists(composer_json) or os.path.exists(os.path.join(workspace_dir, "artisan")):
-            detected_fw = "PHP / Laravel"
-            generated_content = (
-                "FROM php:8.2-cli-alpine\n"
-                "WORKDIR /var/www/html\n"
-                "RUN apk add --no-cache bash curl git unzip libpng-dev libzip-dev libpq-dev mysql-client postgresql-client sqlite-dev oniguruma-dev libxml2-dev\n"
-                "RUN docker-php-ext-install pdo pdo_mysql pdo_pgsql mysqli bcmath mbstring xml zip\n"
-                "RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer\n"
-                "COPY . .\n"
-                "RUN if [ -f composer.json ]; then composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --ignore-platform-reqs || true; fi\n"
-                "RUN mkdir -p storage bootstrap/cache && chmod -R 777 storage bootstrap/cache || true\n"
-                f"ENV PORT={container_port}\n"
-                f"EXPOSE {container_port}\n"
-                "CMD [\"sh\", \"-c\", \"if [ -f artisan ] && ! grep -q 'APP_KEY=base64' .env; then php artisan key:generate --force || true; fi; php -S 0.0.0.0:${PORT:-80} -t public\"]\n"
-            )
-        elif os.path.exists(index_html):
-            detected_fw = "Static HTML / Web"
-            generated_content = (
-                "FROM nginx:alpine\n"
-                "COPY . /usr/share/nginx/html\n"
-                "EXPOSE 80\n"
-                "CMD [\"nginx\", \"-g\", \"daemon off;\"]\n"
-            )
-        else:
-            detected_fw = "Standard Web Container"
-            generated_content = (
-                "FROM python:3.11-alpine\n"
-                "WORKDIR /app\n"
-                "COPY . .\n"
-                f"ENV PORT={container_port}\n"
-                f"EXPOSE {container_port}\n"
-                f"CMD [\"python\", \"-m\", \"http.server\", \"{container_port}\"]\n"
-            )
-
-        target_file = os.path.join(workspace_dir, "Dockerfile")
-        with open(target_file, "w", encoding="utf-8", newline="\n") as f:
-            f.write(generated_content)
-
-        log_callback("info", f"[Docker] Dockerfile tidak ditemukan di project — Otomatis membuat Dockerfile optimal untuk stack '{detected_fw}' (Port: {container_port}).")
-        return "Dockerfile"
+        resolved_df, created_df, created_di = ensure_dockerfile_and_ignore(
+            workspace_dir=workspace_dir,
+            dockerfile_path=dockerfile_path,
+            fallback_framework=fallback_framework,
+            container_port=container_port,
+            log_callback=log_callback,
+        )
+        return resolved_df
 
     @staticmethod
     def _extract_port_args(full_df_path: str, workspace_dir: str, log_callback: Callable[[str, str], None]) -> List[str]:
@@ -810,23 +967,29 @@ class DeploymentEngine:
 
     @staticmethod
     def _resolve_psm_network_name() -> Optional[str]:
-        """Find the Docker network where psm-postgres resides so deployed containers can auto-connect."""
+        """Find the Docker network where homelab databases and services reside so deployed containers can auto-connect."""
         try:
             import docker
             client = docker.from_env()
-            try:
-                pg = client.containers.get("psm-postgres")
-                nets = list((pg.attrs.get("NetworkSettings", {}).get("Networks") or {}).keys())
-                if nets:
-                    return nets[0]
-            except Exception:
-                pass
+            for container_name in ("homelab-postgres", "homelab-mysql", "psm-postgres", "homelab_minio", "pap-api", "psm-agent", "homelab_router"):
+                try:
+                    c = client.containers.get(container_name)
+                    nets = list((c.attrs.get("NetworkSettings", {}).get("Networks") or {}).keys())
+                    custom_nets = [n for n in nets if n not in ("bridge", "host", "none")]
+                    if "psm-network" in custom_nets:
+                        return "psm-network"
+                    if "homelab-network" in custom_nets:
+                        return "homelab-network"
+                    if custom_nets:
+                        return custom_nets[0]
+                except Exception:
+                    continue
             for net in client.networks.list():
-                if net.name == "psm-network" or net.name.endswith("_psm-network"):
+                if net.name in ("psm-network", "homelab-network"):
                     return net.name
         except Exception:
             pass
-        return None
+        return "psm-network"
 
     @staticmethod
     def build_and_run_dockerfile(
@@ -838,7 +1001,7 @@ class DeploymentEngine:
         port_mappings: Optional[str] = None
     ) -> bool:
         """Build image using Dockerfile and launch container directly.
-        Automatically attaches container to the PostgreSQL Docker network (psm-network)
+        Automatically attaches container to the homelab network (psm-network)
         and runs post-deploy database migrations if applicable.
         """
         full_df_path = os.path.join(workspace_dir, dockerfile_path)
@@ -846,8 +1009,8 @@ class DeploymentEngine:
             log_callback("error", f"[Docker] Dockerfile not found at {full_df_path}")
             return False
 
-        # Ensure PHP/Laravel Dockerfiles have pdo_pgsql and normalized LF scripts
-        DeploymentEngine.prepare_dockerfile_for_postgres(workspace_dir, dockerfile_path, log_callback)
+        # Ensure required database drivers and normalize script line endings
+        DeploymentEngine.prepare_dockerfile_environment(workspace_dir, dockerfile_path, log_callback)
 
         sanitized_tag = re.sub(r"[^a-z0-9_.:-]", "-", image_tag.lower())
         sanitized_name = re.sub(r"[^a-zA-Z0-9_.-]", "-", container_name.lower())

@@ -108,6 +108,7 @@ DEFAULT_IOT_FLEET_FALLBACK: Dict[str, Any] = {
 def _candidate_urls() -> List[str]:
     configured = (settings.PAP_API_URL or "http://192.168.25.101:8000").rstrip("/")
     candidates = [
+        "http://pap-api:8000",
         "http://127.0.0.1:8000",
         configured,
     ]
@@ -227,6 +228,31 @@ def sync_psm_to_pap(db: Session) -> Dict[str, Any]:
         "containers_count": len(payload["containers"]),
         "pap_response": payload,
     }
+
+
+def sync_domain_routing(domain: str, target_port: int, project_name: Optional[str] = None) -> bool:
+    """Register or update domain route with PAP DNS & Ingress Router."""
+    if not domain:
+        return False
+    # 1. Try PAP API via HTTP
+    payload = {
+        "domain": domain,
+        "target_port": target_port,
+        "target_host": "host.docker.internal",
+        "project_name": project_name,
+    }
+    resp = request_pap("POST", "/api/v1/dns/records", json_body=payload, timeout=2.0)
+    if resp is not None and resp.status_code in (200, 201):
+        return True
+
+    # 2. Direct Service Fallback (if mounted/shared)
+    try:
+        from app.modules.dns.service import DnsService
+        DnsService.register_domain_route(domain=domain, target_port=target_port, project_name=project_name)
+        return True
+    except Exception:
+        pass
+    return False
 
 
 def get_pap_hub_status(db: Session) -> Dict[str, Any]:

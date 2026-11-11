@@ -423,6 +423,77 @@ def cmd_import_grafana(args):
     return 0 if success > 0 else 1
 
 
+def cmd_init_dockerfile(args):
+    psm_root = Path(__file__).resolve().parent / "Personal_Server_Manager"
+    if str(psm_root) not in sys.path:
+        sys.path.insert(0, str(psm_root))
+    from apps.agent.app.deployment.dockerfile_generator import (
+        detect_project_stack,
+        generate_dockerfile,
+        generate_dockerignore,
+    )
+    target_dir = os.path.abspath(args.path)
+    if not os.path.exists(target_dir):
+        print(f"[Error] Directory not found: {target_dir}")
+        return 1
+
+    stack = detect_project_stack(target_dir)
+    print("==================================================================")
+    print("   PSM DOCKERFILE SETUP ASSISTANT (Professional PaaS Deployer)")
+    print("==================================================================")
+    print(f"Target Directory  : {target_dir}")
+    print(f"Detected Stack    : {stack.get('detected_stack')}")
+    print(f"Framework         : {stack.get('framework')}")
+    print(f"Package Manager   : {stack.get('package_manager')}")
+    print(f"Recommended Port  : {stack.get('recommended_port')}")
+
+    tmpl_key = stack.get("template_key", "nextjs")
+    if args.framework and args.framework != "auto":
+        fw_clean = args.framework.lower()
+        if "next" in fw_clean:
+            tmpl_key = "nextjs"
+        elif "vite" in fw_clean or "react" in fw_clean or "vue" in fw_clean:
+            tmpl_key = "vite_spa"
+        elif "fastapi" in fw_clean:
+            tmpl_key = "fastapi"
+        elif "django" in fw_clean:
+            tmpl_key = "django"
+        elif "flask" in fw_clean:
+            tmpl_key = "flask"
+        elif "laravel" in fw_clean or "php" in fw_clean:
+            tmpl_key = "laravel"
+        elif "go" in fw_clean:
+            tmpl_key = "golang"
+        elif "static" in fw_clean or "html" in fw_clean:
+            tmpl_key = "static_html"
+        else:
+            tmpl_key = "node_backend"
+
+    port = args.port or stack.get("recommended_port", 3000)
+    df_content = generate_dockerfile(tmpl_key, port=port)
+    di_content = generate_dockerignore()
+
+    df_path = os.path.join(target_dir, "Dockerfile")
+    di_path = os.path.join(target_dir, ".dockerignore")
+
+    if not os.path.exists(df_path) or args.overwrite:
+        with open(df_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(df_content)
+        print(f"\n[+] Created professional Dockerfile: {df_path}")
+    else:
+        print(f"\n[i] Dockerfile already exists at {df_path} (use --overwrite to replace)")
+
+    if not os.path.exists(di_path) or args.overwrite:
+        with open(di_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(di_content)
+        print(f"[+] Created context guard .dockerignore: {di_path}")
+    else:
+        print(f"[i] .dockerignore already exists at {di_path} (use --overwrite to replace)")
+
+    print("\n[OK] Setup complete! Project is now ready for deployment in PSM.")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="CLI Manajemen Terpadu Homelab Server")
     subparsers = parser.add_subparsers(dest="command", help="Perintah yang tersedia")
@@ -452,10 +523,19 @@ def main():
     parser_dns = subparsers.add_parser("dns", help="Tampilkan daftar domain lokal & status DNS")
     parser_dns.add_argument("--host", default=os.getenv("HOST_IP", "192.168.25.101"), help="IP Host Homelab")
 
+    # Command: init-dockerfile
+    parser_df = subparsers.add_parser("init-dockerfile", help="PSM Professional Deployer: Tambahkan Dockerfile multi-stage & .dockerignore ke project")
+    parser_df.add_argument("path", nargs="?", default=".", help="Path direktori project (default: current directory)")
+    parser_df.add_argument("--framework", "-f", default="auto", help="Pilih framework manual (nextjs, vite, fastapi, laravel, go, dll)")
+    parser_df.add_argument("--port", "-p", type=int, default=None, help="Port container target")
+    parser_df.add_argument("--overwrite", action="store_true", help="Timpa file Dockerfile & .dockerignore jika sudah ada")
+
     args = parser.parse_args()
 
     if args.command == "status":
         cmd_status(args)
+    elif args.command == "init-dockerfile":
+        sys.exit(cmd_init_dockerfile(args))
     elif args.command == "provision-db":
         import auto_provision_all_databases
         auto_provision_all_databases.provision_mysql()

@@ -25,6 +25,10 @@ import {
   AlertTriangle,
   Play,
   Square,
+  FileCode,
+  Download,
+  Eye,
+  Sparkles,
 } from 'lucide-react';
 import { api, formatBytes } from '../../../lib/api';
 import { DeployProjectModal } from '../../../components/deploy-project-modal';
@@ -45,7 +49,7 @@ export default function ProjectDetailPage() {
   const [restartingContainer, setRestartingContainer] = useState(false);
   const [autoRefreshLogs, setAutoRefreshLogs] = useState(true);
   const [copiedLogs, setCopiedLogs] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'deployments' | 'terminal' | 'database' | 'environment' | 'settings'>('terminal');
+  const [activeTab, setActiveTab] = useState<'overview' | 'deployments' | 'terminal' | 'dockerfile' | 'database' | 'environment' | 'settings'>('terminal');
   const [loading, setLoading] = useState(true);
   const [deploying, setDeploying] = useState(false);
   const [deployModalOpen, setDeployModalOpen] = useState(false);
@@ -58,6 +62,18 @@ export default function ProjectDetailPage() {
   const [copiedDbUrl, setCopiedDbUrl] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
+
+  // Dockerfile Setup Assistant state
+  const [dockerfileData, setDockerfileData] = useState<any>(null);
+  const [dockerfileContent, setDockerfileContent] = useState<string>('');
+  const [dockerignoreContent, setDockerignoreContent] = useState<string>('');
+  const [dockerfileSubTab, setDockerfileSubTab] = useState<'dockerfile' | 'dockerignore'>('dockerfile');
+  const [savingDockerfile, setSavingDockerfile] = useState(false);
+  const [loadingDockerfile, setLoadingDockerfile] = useState(false);
+  const [dockerfileTemplates, setDockerfileTemplates] = useState<any>({});
+  const [selectedTemplateKey, setSelectedTemplateKey] = useState<string>('');
+  const [copiedDockerfile, setCopiedDockerfile] = useState(false);
+  const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
 
   // New env var form
   const [newKey, setNewKey] = useState('');
@@ -127,6 +143,82 @@ export default function ProjectDetailPage() {
   useEffect(() => {
     loadData();
   }, [projectId]);
+
+  const loadDockerfile = async () => {
+    try {
+      setLoadingDockerfile(true);
+      const [dfRes, tmplRes] = await Promise.all([
+        api.getProjectDockerfile(projectId).catch(() => null),
+        api.getDockerfileTemplates().catch(() => ({ templates: {} })),
+      ]);
+      if (dfRes) {
+        setDockerfileData(dfRes);
+        setDockerfileContent(dfRes.dockerfile || '');
+        setDockerignoreContent(dfRes.dockerignore || '');
+      }
+      if (tmplRes && tmplRes.templates) {
+        setDockerfileTemplates(tmplRes.templates);
+      }
+    } catch (e) {
+      console.error('Failed to load dockerfile:', e);
+    } finally {
+      setLoadingDockerfile(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'dockerfile') {
+      loadDockerfile();
+    }
+  }, [activeTab, projectId]);
+
+  const handleSaveDockerfile = async () => {
+    try {
+      setSavingDockerfile(true);
+      setSaveSuccessMsg('');
+      await api.updateProjectDockerfile(projectId, {
+        dockerfile: dockerfileContent,
+        dockerignore: dockerignoreContent,
+        dockerfile_path: dockerfileData?.dockerfile_path || 'Dockerfile',
+      });
+      setSaveSuccessMsg('✓ Dockerfile dan .dockerignore berhasil disimpan ke workspace project!');
+      setTimeout(() => setSaveSuccessMsg(''), 4000);
+      loadDockerfile();
+    } catch (err: any) {
+      alert(err.message || 'Gagal menyimpan Dockerfile');
+    } finally {
+      setSavingDockerfile(false);
+    }
+  };
+
+  const handleApplyTemplate = (tmplKey: string) => {
+    setSelectedTemplateKey(tmplKey);
+    const tmpl = dockerfileTemplates[tmplKey];
+    if (tmpl && tmpl.sample_content) {
+      setDockerfileContent(tmpl.sample_content);
+    }
+  };
+
+  const handleRegenerateDockerfile = async () => {
+    try {
+      setLoadingDockerfile(true);
+      const res = await api.generateDockerfilePreview({
+        framework: project?.framework || 'Next.js',
+        template_key: selectedTemplateKey || undefined,
+        project_name: project?.name,
+      });
+      if (res && res.dockerfile) {
+        setDockerfileContent(res.dockerfile);
+        if (res.dockerignore) setDockerignoreContent(res.dockerignore);
+        setSaveSuccessMsg('✓ Dockerfile profesional di-generate ulang! Klik "Simpan ke Workspace" untuk menerapkan.');
+        setTimeout(() => setSaveSuccessMsg(''), 4000);
+      }
+    } catch (err: any) {
+      alert(err.message || 'Gagal generate ulang Dockerfile');
+    } finally {
+      setLoadingDockerfile(false);
+    }
+  };
 
   useEffect(() => {
     if (!autoRefreshLogs || activeTab !== 'terminal') return;
@@ -361,6 +453,13 @@ export default function ProjectDetailPage() {
             badgeColor: containerInfo?.running ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-500 border border-rose-500/20',
           },
           { key: 'deployments', label: `Deployments (${deployments.length})`, icon: Rocket },
+          {
+            key: 'dockerfile',
+            label: 'Dockerfile',
+            icon: FileCode,
+            badge: dockerfileData?.exists ? 'Workspace' : (dockerfileData?.is_generated ? 'Auto PaaS' : null),
+            badgeColor: dockerfileData?.exists ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20',
+          },
           { key: 'database', label: `Database (${dbTypeBadge})`, icon: Database },
           { key: 'environment', label: `Environment (${envVars.length})`, icon: Key },
           { key: 'overview', label: 'Source & Build', icon: FolderGit2 },
@@ -601,7 +700,222 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      {/* Tab: Database Auto-Connect & Auto-Create */}
+      {/* Tab: Dockerfile & PaaS Build Configuration */}
+      {activeTab === 'dockerfile' && (
+        <div className="space-y-6">
+          {/* Header Card */}
+          <div className="rounded-xl border border-indigo-500/20 bg-card p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                  <FileCode className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-sm text-foreground">Dockerfile & Build Configuration</h3>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+                        dockerfileData?.exists
+                          ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+                          : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                      }`}
+                    >
+                      {dockerfileData?.exists
+                        ? `✓ Workspace: ${dockerfileData?.dockerfile_path || 'Dockerfile'}`
+                        : '⚡ Auto-Generated (PaaS Standard)'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Personal Server Manager mendukung deployment profesional dengan Dockerfile multi-stage production dan proteksi context .dockerignore.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={loadDockerfile}
+                  disabled={loadingDockerfile}
+                  className="px-3 py-1.5 rounded-lg border border-border hover:bg-background text-gray-400 hover:text-foreground text-xs font-medium transition-colors flex items-center gap-1.5"
+                  title="Muat ulang dari disk"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingDockerfile ? 'animate-spin' : ''}`} />
+                  <span>Reload</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveDockerfile}
+                  disabled={savingDockerfile}
+                  className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition-colors flex items-center gap-1.5 shadow-sm"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>{savingDockerfile ? 'Menyimpan...' : 'Simpan ke Workspace'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Save Success Alert */}
+            {saveSuccessMsg && (
+              <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs flex items-center gap-2 animate-in fade-in duration-200">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>{saveSuccessMsg}</span>
+              </div>
+            )}
+
+            {/* Template Presets Bar */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3 rounded-lg bg-background border border-border text-xs">
+              <div className="flex items-center gap-2 flex-1">
+                <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                <span className="text-gray-400 font-medium whitespace-nowrap">Template Stack Preset:</span>
+                <select
+                  value={selectedTemplateKey}
+                  onChange={(e) => handleApplyTemplate(e.target.value)}
+                  className="flex-1 px-3 py-1.5 rounded-lg bg-card border border-border text-foreground text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                >
+                  <option value="">Pilih Preset Template Profesional...</option>
+                  {Object.keys(dockerfileTemplates).map((k) => (
+                    <option key={k} value={k}>
+                      {dockerfileTemplates[k].name} (Port: {dockerfileTemplates[k].default_port})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleRegenerateDockerfile}
+                  disabled={loadingDockerfile}
+                  className="px-3 py-1.5 rounded-lg border border-indigo-500/30 hover:bg-indigo-500/10 text-indigo-400 text-xs font-medium transition-colors flex items-center gap-1"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Generate Ulang Otomatis</span>
+                </button>
+              </div>
+            </div>
+
+            {/* File Switcher & Code Editor */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between border-b border-border pb-2">
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setDockerfileSubTab('dockerfile')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-colors flex items-center gap-1.5 ${
+                      dockerfileSubTab === 'dockerfile'
+                        ? 'bg-indigo-600/15 text-indigo-400 border border-indigo-500/30'
+                        : 'text-gray-400 hover:text-foreground'
+                    }`}
+                  >
+                    <FileCode className="w-3.5 h-3.5" />
+                    <span>Dockerfile</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDockerfileSubTab('dockerignore')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-colors flex items-center gap-1.5 ${
+                      dockerfileSubTab === 'dockerignore'
+                        ? 'bg-indigo-600/15 text-indigo-400 border border-indigo-500/30'
+                        : 'text-gray-400 hover:text-foreground'
+                    }`}
+                  >
+                    <span>.dockerignore</span>
+                    <span className="px-1.5 py-0.2 rounded text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                      Context Guard
+                    </span>
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const text = dockerfileSubTab === 'dockerfile' ? dockerfileContent : dockerignoreContent;
+                      navigator.clipboard.writeText(text);
+                      setCopiedDockerfile(true);
+                      setTimeout(() => setCopiedDockerfile(false), 2000);
+                    }}
+                    className="px-2.5 py-1 rounded-md border border-border hover:bg-background text-gray-400 hover:text-foreground text-xs flex items-center gap-1 transition-colors"
+                  >
+                    {copiedDockerfile ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedDockerfile ? 'Copied' : 'Salin'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const text = dockerfileSubTab === 'dockerfile' ? dockerfileContent : dockerignoreContent;
+                      const fname = dockerfileSubTab === 'dockerfile' ? 'Dockerfile' : '.dockerignore';
+                      const blob = new Blob([text], { type: 'text/plain' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = fname;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                    className="px-2.5 py-1 rounded-md border border-border hover:bg-background text-gray-400 hover:text-foreground text-xs flex items-center gap-1 transition-colors"
+                  >
+                    <Download className="w-3 h-3" />
+                    <span>Unduh</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Textarea Code Editor */}
+              <div className="relative rounded-lg border border-border bg-[#0d1117] overflow-hidden">
+                <textarea
+                  value={dockerfileSubTab === 'dockerfile' ? dockerfileContent : dockerignoreContent}
+                  onChange={(e) => {
+                    if (dockerfileSubTab === 'dockerfile') {
+                      setDockerfileContent(e.target.value);
+                    } else {
+                      setDockerignoreContent(e.target.value);
+                    }
+                  }}
+                  rows={20}
+                  spellCheck={false}
+                  className="w-full p-4 bg-transparent text-gray-200 font-mono text-xs focus:outline-none resize-y leading-relaxed"
+                  placeholder={dockerfileSubTab === 'dockerfile' ? '# Masukkan konten Dockerfile...' : '# Masukkan pola .dockerignore...'}
+                />
+              </div>
+            </div>
+
+            {/* Architecture Highlights / Explanations */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 text-xs">
+              <div className="p-3 rounded-lg border border-border bg-background/50 space-y-1">
+                <div className="font-semibold text-foreground flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Multi-Stage Standalone</span>
+                </div>
+                <p className="text-[11px] text-gray-400 leading-normal">
+                  Memisahkan layer instalasi dependencies, build, dan runner runtime sehingga ukuran final image berkurang drastis (&lt;120MB) dan proses build cepat.
+                </p>
+              </div>
+
+              <div className="p-3 rounded-lg border border-border bg-background/50 space-y-1">
+                <div className="font-semibold text-foreground flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Non-Root Security User</span>
+                </div>
+                <p className="text-[11px] text-gray-400 leading-normal">
+                  Container dijalankan oleh user aplikasi non-root terisolasi (seperti <code>nextjs</code>, <code>node</code>, <code>appuser</code>) untuk melindungi sistem host homelab.
+                </p>
+              </div>
+
+              <div className="p-3 rounded-lg border border-border bg-background/50 space-y-1">
+                <div className="font-semibold text-foreground flex items-center gap-1.5">
+                  <FileCode className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Proteksi Context Guard</span>
+                </div>
+                <p className="text-[11px] text-gray-400 leading-normal">
+                  File <code>.dockerignore</code> otomatis mencegah direktori berat host (<code>node_modules</code>, <code>.git</code>, <code>.venv</code>) dikirim ke daemon Docker.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {activeTab === 'database' && (
         <div className="space-y-6">
           <div className="rounded-xl border border-border bg-card p-5 space-y-5">
