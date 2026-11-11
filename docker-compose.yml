@@ -366,7 +366,7 @@ services:
   # Persistent cloud object storage for deployed apps (Laravel, Node, Python, Backups)
   # ═════════════════════════════════════════════════════════════════
   minio:
-    image: minio/minio:latest
+    image: pgsty/silo:latest
     container_name: homelab_minio
     restart: unless-stopped
     command: server /data --console-address ":9002"
@@ -391,7 +391,7 @@ services:
       start_period: 5s
 
   minio-init:
-    image: minio/mc:latest
+    image: pgsty/mc:latest
     container_name: homelab_minio_init
     restart: "no"
     depends_on:
@@ -399,12 +399,13 @@ services:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      /usr/bin/mc alias set myminio http://minio:9000 $${MINIO_ROOT_USER:-admin} $${MINIO_ROOT_PASSWORD:-admin12345};
-      /usr/bin/mc mb myminio/homelab-storage --ignore-existing;
-      /usr/bin/mc mb myminio/stock-umkm --ignore-existing;
-      /usr/bin/mc mb myminio/backups --ignore-existing;
-      /usr/bin/mc anonymous set download myminio/homelab-storage;
-      /usr/bin/mc anonymous set download myminio/stock-umkm;
+      MC_CMD=$$(command -v mc || command -v mcli || echo '/usr/bin/mc');
+      $$MC_CMD alias set myminio http://minio:9000 $${MINIO_ROOT_USER:-admin} $${MINIO_ROOT_PASSWORD:-admin12345};
+      $$MC_CMD mb myminio/homelab-storage --ignore-existing;
+      $$MC_CMD mb myminio/stock-umkm --ignore-existing;
+      $$MC_CMD mb myminio/backups --ignore-existing;
+      $$MC_CMD anonymous set download myminio/homelab-storage;
+      $$MC_CMD anonymous set download myminio/stock-umkm;
       echo 'MinIO buckets and policies successfully initialized';
       exit 0;
       "
