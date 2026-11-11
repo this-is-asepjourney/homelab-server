@@ -38,7 +38,8 @@ data/
 uploads/
 workspace/
 releases/
-storage/
+/storage/
+!apps/web/app/storage/**
 
 # Environment files
 .env

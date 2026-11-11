@@ -60,11 +60,15 @@ DEFAULT_HOSTS_TEMPLATE = """# Homelab Local DNS Static Hosts Mapping
 192.168.25.101 kuma.homelab
 192.168.25.101 vault.homelab
 192.168.25.101 cockpit.homelab
+192.168.25.101 minio.homelab
+192.168.25.101 s3.homelab
 
 100.106.63.90 psm.tailscale.homelab
 100.106.63.90 api.tailscale.homelab
 100.106.63.90 iot.tailscale.homelab
 100.106.63.90 grafana.tailscale.homelab
+100.106.63.90 minio.tailscale.homelab
+100.106.63.90 s3.tailscale.homelab
 """
 
 BUILTIN_SERVICES = [
@@ -77,6 +81,8 @@ BUILTIN_SERVICES = [
     {"domain": "kuma.homelab", "target": "192.168.25.101:3002", "type": "Health Check", "desc": "Uptime Kuma Hub"},
     {"domain": "vault.homelab", "target": "192.168.25.101:8080", "type": "Security", "desc": "Vaultwarden Password Manager"},
     {"domain": "cockpit.homelab", "target": "192.168.25.101:9090", "type": "OS Management", "desc": "Ubuntu Cockpit Web Console"},
+    {"domain": "minio.homelab", "target": "minio:9002", "type": "Storage Console", "desc": "MinIO S3 Web Console"},
+    {"domain": "s3.homelab", "target": "minio:9000", "type": "Storage API", "desc": "MinIO S3 Object Storage API"},
 ]
 
 

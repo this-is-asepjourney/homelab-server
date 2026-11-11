@@ -82,6 +82,17 @@ class Settings(BaseSettings):
     INFLUXDB_BUCKET: str = "eternal_telemetry"
     INFLUXDB_TOKEN: str = "homelab-influxdb-master-auth-token-2026"
 
+    # MinIO S3 Object Storage Settings
+    MINIO_HOST: str = "minio"
+    MINIO_PORT: int = 9000
+    MINIO_CONSOLE_PORT: int = 9002
+    MINIO_URL: str = "http://minio:9000"
+    MINIO_PUBLIC_URL: str = "http://192.168.25.101:9000"
+    MINIO_CONSOLE_URL: str = "http://192.168.25.101:9002"
+    MINIO_ROOT_USER: str = "admin"
+    MINIO_ROOT_PASSWORD: str = "admin12345"
+    MINIO_DEFAULT_BUCKET: str = "homelab-storage"
+
     # Prometheus & Monitoring
     PROMETHEUS_URL: str = "http://host.docker.internal:9001"
     PROMETHEUS_TIMEOUT_SECONDS: float = 5.0
