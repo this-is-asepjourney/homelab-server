@@ -71,6 +71,7 @@ services:
       dockerfile: "Personal Api Platform/docker/Dockerfile"
     container_name: pap-api
     restart: unless-stopped
+    user: "0:0"
     stop_grace_period: 3s
     env_file:
       - .env
@@ -265,6 +266,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - psm-storage:/opt/psm
+      - ./Personal_Server_Manager/apps/agent:/app/apps/agent:rw
     depends_on:
       pap-api:
         condition: service_started

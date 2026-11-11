@@ -21,6 +21,10 @@ import {
   HardDrive,
   Globe,
   ExternalLink,
+  Terminal,
+  AlertTriangle,
+  Play,
+  Square,
 } from 'lucide-react';
 import { api, formatBytes } from '../../../lib/api';
 import { DeployProjectModal } from '../../../components/deploy-project-modal';
@@ -35,7 +39,13 @@ export default function ProjectDetailPage() {
   const [deployments, setDeployments] = useState<any[]>([]);
   const [envVars, setEnvVars] = useState<any[]>([]);
   const [dbInfo, setDbInfo] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'deployments' | 'database' | 'environment' | 'settings'>('deployments');
+  const [containerInfo, setContainerInfo] = useState<any>(null);
+  const [containerLogs, setContainerLogs] = useState<string>('');
+  const [loadingLogs, setLoadingLogs] = useState(false);
+  const [restartingContainer, setRestartingContainer] = useState(false);
+  const [autoRefreshLogs, setAutoRefreshLogs] = useState(true);
+  const [copiedLogs, setCopiedLogs] = useState(false);
+  const [activeTab, setActiveTab] = useState<'overview' | 'deployments' | 'terminal' | 'database' | 'environment' | 'settings'>('terminal');
   const [loading, setLoading] = useState(true);
   const [deploying, setDeploying] = useState(false);
   const [deployModalOpen, setDeployModalOpen] = useState(false);
@@ -47,26 +57,59 @@ export default function ProjectDetailPage() {
   const [copiedWebhook, setCopiedWebhook] = useState(false);
   const [copiedDbUrl, setCopiedDbUrl] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const terminalEndRef = useRef<HTMLDivElement>(null);
 
   // New env var form
   const [newKey, setNewKey] = useState('');
   const [newValue, setNewValue] = useState('');
 
+  const fetchContainerLogs = async () => {
+    try {
+      setLoadingLogs(true);
+      const [cInfo, cLogs] = await Promise.all([
+        api.getProjectContainer(projectId).catch(() => null),
+        api.getProjectContainerLogs(projectId, 250).catch(() => ({ logs: '' })),
+      ]);
+      setContainerInfo(cInfo);
+      setContainerLogs(cLogs?.logs || '');
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingLogs(false);
+    }
+  };
+
+  const handleRestartContainer = async () => {
+    try {
+      setRestartingContainer(true);
+      await api.restartProjectContainer(projectId);
+      await fetchContainerLogs();
+    } catch (err: any) {
+      alert(err.message || 'Gagal me-restart container');
+    } finally {
+      setRestartingContainer(false);
+    }
+  };
+
   const loadData = async () => {
     try {
       setLoading(true);
-      const [p, d, env, dbData, s] = await Promise.all([
+      const [p, d, env, dbData, s, cInfo, cLogs] = await Promise.all([
         api.getProject(projectId),
         api.getDeployments().then((list) => list.filter((item: any) => item.project_id === projectId)),
         api.getProjectEnvironment(projectId),
         api.getProjectDatabase(projectId),
         api.getServers().catch(() => []),
+        api.getProjectContainer(projectId).catch(() => null),
+        api.getProjectContainerLogs(projectId, 250).catch(() => ({ logs: '' })),
       ]);
       setProject(p);
       setDeployments(d);
       setEnvVars(env);
       setDbInfo(dbData);
       setServers(s);
+      setContainerInfo(cInfo);
+      setContainerLogs(cLogs?.logs || '');
       setPortMappingsInput(p?.port_mappings || '3000:3000');
       setSelectedDbType(p?.db_type || dbData?.db_type || 'postgres');
       if (dbData?.db_name) {
@@ -84,6 +127,14 @@ export default function ProjectDetailPage() {
   useEffect(() => {
     loadData();
   }, [projectId]);
+
+  useEffect(() => {
+    if (!autoRefreshLogs || activeTab !== 'terminal') return;
+    const interval = setInterval(() => {
+      fetchContainerLogs();
+    }, 3500);
+    return () => clearInterval(interval);
+  }, [autoRefreshLogs, activeTab, projectId]);
 
   const handleTriggerDeploy = async () => {
     try {
@@ -216,6 +267,22 @@ export default function ProjectDetailPage() {
               <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
                 {project?.status}
               </span>
+              {containerInfo && (
+                <button
+                  onClick={() => setActiveTab('terminal')}
+                  className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-mono font-semibold border transition-all ${
+                    containerInfo.running
+                      ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20 hover:bg-emerald-500/20'
+                      : containerInfo.state === 'exited'
+                      ? 'bg-rose-500/10 text-rose-500 border-rose-500/20 hover:bg-rose-500/20'
+                      : 'bg-amber-500/10 text-amber-500 border-amber-500/20 hover:bg-amber-500/20'
+                  }`}
+                  title="Klik untuk membuka Terminal Logs container"
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${containerInfo.running ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+                  <span>Container: {containerInfo.running ? 'RUNNING' : (containerInfo.state === 'exited' ? `EXITED (${containerInfo.exit_code ?? 1})` : containerInfo.state || 'STOPPED')}</span>
+                </button>
+              )}
               <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-blue-500/10 text-blue-500 border border-blue-500/20">
                 <Globe className="w-3 h-3" />
                 <span>Port: {project?.port_mappings || '3000:3000'}</span>
@@ -286,12 +353,19 @@ export default function ProjectDetailPage() {
       {/* Tabs Header */}
       <div className="flex items-center gap-2 border-b border-border text-sm overflow-x-auto pb-px">
         {[
+          {
+            key: 'terminal',
+            label: 'Terminal Logs',
+            icon: Terminal,
+            badge: containerInfo?.running ? 'Running' : (containerInfo?.state === 'exited' ? `Exited (${containerInfo?.exit_code ?? 1})` : null),
+            badgeColor: containerInfo?.running ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-500 border border-rose-500/20',
+          },
           { key: 'deployments', label: `Deployments (${deployments.length})`, icon: Rocket },
-          { key: 'database', label: `Database (${(project?.db_type || 'Postgres').toUpperCase()})`, icon: Database },
+          { key: 'database', label: `Database (${dbTypeBadge})`, icon: Database },
           { key: 'environment', label: `Environment (${envVars.length})`, icon: Key },
           { key: 'overview', label: 'Source & Build', icon: FolderGit2 },
           { key: 'settings', label: 'Settings', icon: Settings },
-        ].map((tab) => {
+        ].map((tab: any) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.key;
           return (
@@ -306,10 +380,146 @@ export default function ProjectDetailPage() {
             >
               <Icon className="w-4 h-4" />
               <span>{tab.label}</span>
+              {tab.badge && (
+                <span className={`px-1.5 py-0.2 rounded text-[9px] font-mono font-bold ${tab.badgeColor || 'bg-gray-500/20 text-gray-400'}`}>
+                  {tab.badge}
+                </span>
+              )}
             </button>
           );
         })}
       </div>
+
+      {/* Tab: Container Terminal Logs */}
+      {activeTab === 'terminal' && (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
+            {/* Header Controls */}
+            <div className="p-4 border-b border-border bg-background/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-blue-500/10 text-blue-500">
+                  <Terminal className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-sm text-foreground">
+                      Container Console &amp; Terminal Logs
+                    </h3>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase ${
+                        containerInfo?.running
+                          ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
+                          : containerInfo?.state === 'exited'
+                          ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20'
+                          : 'bg-amber-500/10 text-amber-500 border border-amber-500/20'
+                      }`}
+                    >
+                      {containerInfo?.running ? '● RUNNING' : `● ${containerInfo?.state || 'STOPPED'} (Exit: ${containerInfo?.exit_code ?? 0})`}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 font-mono mt-0.5">
+                    Container: {containerInfo?.container_name || project?.name} • Image: {containerInfo?.image || `${project?.name}:latest`}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <label className="flex items-center gap-1.5 text-xs text-gray-400 mr-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={autoRefreshLogs}
+                    onChange={(e) => setAutoRefreshLogs(e.target.checked)}
+                    className="rounded border-border text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>Live Stream (3s)</span>
+                </label>
+
+                <button
+                  onClick={fetchContainerLogs}
+                  disabled={loadingLogs}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border hover:bg-card text-foreground text-xs font-medium transition-colors disabled:opacity-50"
+                  title="Muat ulang log"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingLogs ? 'animate-spin' : ''}`} />
+                  <span>Refresh</span>
+                </button>
+
+                <button
+                  onClick={handleRestartContainer}
+                  disabled={restartingContainer}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 text-xs font-medium transition-colors disabled:opacity-50"
+                  title="Restart container Docker"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${restartingContainer ? 'animate-spin' : ''}`} />
+                  <span>{restartingContainer ? 'Restarting...' : 'Restart Container'}</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    if (containerLogs) {
+                      navigator.clipboard.writeText(containerLogs);
+                      setCopiedLogs(true);
+                      setTimeout(() => setCopiedLogs(false), 2000);
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border hover:bg-card text-foreground text-xs font-medium transition-colors"
+                >
+                  {copiedLogs ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedLogs ? 'Copied' : 'Copy'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Error or Stopped Banner */}
+            {containerInfo?.exit_code !== undefined && containerInfo.exit_code !== 0 && !containerInfo.running && (
+              <div className="bg-rose-500/10 border-b border-rose-500/20 px-4 py-3 flex items-start gap-2.5 text-xs text-rose-400">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-500" />
+                <div>
+                  <span className="font-bold">Container Berhenti atau Crash (Exit Code: {containerInfo.exit_code})</span>
+                  <p className="text-gray-400 text-[11px] mt-0.5">
+                    {containerInfo.error || 'Aplikasi di dalam container berhenti atau gagal saat booting. Silakan tinjau log terminal di bawah untuk melihat pesan error aplikasi.'}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Terminal Screen */}
+            <div className="bg-[#0b0f19] p-4 text-xs font-mono text-gray-200 overflow-x-auto min-h-[380px] max-h-[560px] overflow-y-auto leading-relaxed border-t border-border/40 select-text">
+              {containerLogs ? (
+                containerLogs.split('\n').map((line, idx) => {
+                  const isError = line.toLowerCase().includes('error') || line.toLowerCase().includes('fatal') || line.toLowerCase().includes('exception') || line.toLowerCase().includes('failed');
+                  const isWarn = line.toLowerCase().includes('warn') || line.toLowerCase().includes('notice');
+                  const isInfo = line.toLowerCase().includes('info') || line.toLowerCase().includes('ready') || line.toLowerCase().includes('running') || line.toLowerCase().includes('started');
+                  return (
+                    <div key={idx} className="flex gap-3 hover:bg-white/5 py-0.5 px-1 rounded">
+                      <span className="text-gray-600 select-none text-[10px] w-8 text-right shrink-0">{idx + 1}</span>
+                      <span
+                        className={`break-all ${
+                          isError
+                            ? 'text-rose-400 font-semibold'
+                            : isWarn
+                            ? 'text-amber-300'
+                            : isInfo
+                            ? 'text-blue-300'
+                            : 'text-gray-300'
+                        }`}
+                      >
+                        {line}
+                      </span>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="flex flex-col items-center justify-center h-48 text-gray-500 space-y-2">
+                  <Terminal className="w-8 h-8 opacity-40" />
+                  <span>Tidak ada log output yang terekam atau container belum berjalan.</span>
+                </div>
+              )}
+              <div ref={terminalEndRef} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tab: Deployments */}
       {activeTab === 'deployments' && (

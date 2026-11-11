@@ -69,6 +69,109 @@ class DeploymentEngine:
             f.write("\n".join(lines) + "\n")
 
     @staticmethod
+    def ensure_project_db(
+        project_name: str,
+        env_vars: Optional[Dict[str, str]],
+        db_config: Optional[Dict[str, Any]],
+        log_callback: Callable[[str, str], None],
+    ) -> Dict[str, str]:
+        """
+        Unified multi-database provisioner & auto-connect helper for deployed projects.
+        Supports:
+          - 'mysql' / 'mariadb': Verifies / creates MySQL DB and sets MySQL connection credentials
+          - 'sqlite': Configures embedded SQLite file
+          - 'none' / 'stateless': Skips database injection
+          - 'postgres': Configures PostgreSQL DB
+        """
+        merged_env = dict(env_vars or {})
+        cfg = dict(db_config or {})
+        db_type = (cfg.get("db_type") or merged_env.get("DB_CONNECTION") or "postgres").lower().strip()
+
+        # 1. Stateless / None
+        if db_type in ("none", "stateless", "false"):
+            log_callback("info", "[Database] Mode stateless — project berjalan tanpa database.")
+            return merged_env
+
+        # 2. SQLite
+        if db_type == "sqlite":
+            clean_db = DeploymentEngine.sanitize_db_name(cfg.get("db_name") or project_name)
+            sqlite_file = f"/data/{clean_db}.db"
+            merged_env["DB_CONNECTION"] = "sqlite"
+            merged_env["DB_DATABASE"] = sqlite_file
+            merged_env["DATABASE_URL"] = f"sqlite:////{sqlite_file}"
+            log_callback("info", f"[SQLite] Konfigurasi database SQLite embedded disiapkan ({sqlite_file}).")
+            return merged_env
+
+        # 3. MySQL / MariaDB
+        if db_type in ("mysql", "mariadb"):
+            target_db = DeploymentEngine.sanitize_db_name(
+                cfg.get("db_name")
+                or merged_env.get("MYSQL_DATABASE")
+                or merged_env.get("DB_DATABASE")
+                or project_name
+            )
+            my_user = cfg.get("user") or os.getenv("MYSQL_USER") or merged_env.get("DB_USERNAME") or "appuser"
+            my_pass = cfg.get("password") or os.getenv("MYSQL_PASSWORD") or merged_env.get("DB_PASSWORD") or "admin12345"
+            my_port = str(cfg.get("port") or os.getenv("MYSQL_PORT") or 3306)
+            my_host = cfg.get("host") or os.getenv("MYSQL_HOST") or os.getenv("STOCK_DB_HOST") or "192.168.25.101"
+
+            # Auto-create MySQL database if host is reachable
+            try:
+                import pymysql
+                m_conn = pymysql.connect(
+                    host=my_host,
+                    port=int(my_port),
+                    user=my_user,
+                    password=my_pass,
+                    connect_timeout=3
+                )
+                m_cur = m_conn.cursor()
+                m_cur.execute(f"CREATE DATABASE IF NOT EXISTS `{target_db}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;")
+                try:
+                    m_cur.execute(f"CREATE USER IF NOT EXISTS '{my_user}'@'%' IDENTIFIED BY '{my_pass}';")
+                    m_cur.execute(f"GRANT ALL PRIVILEGES ON `{target_db}`.* TO '{my_user}'@'%';")
+                    m_cur.execute("FLUSH PRIVILEGES;")
+                except Exception:
+                    pass
+                m_conn.commit()
+                m_cur.close()
+                m_conn.close()
+                log_callback("info", f"[MySQL] Database '{target_db}' aktif & terverifikasi di MySQL Server ({my_host}:{my_port}).")
+            except Exception as me:
+                log_callback("info", f"[MySQL] Menyiapkan parameter koneksi ke database '{target_db}' ({my_host}:{my_port}).")
+
+            conn_url = f"mysql+pymysql://{my_user}:{my_pass}@{my_host}:{my_port}/{target_db}"
+            std_url = f"mysql://{my_user}:{my_pass}@{my_host}:{my_port}/{target_db}"
+
+            my_vars = {
+                "DATABASE_URL": conn_url,
+                "MYSQL_URL": std_url,
+                "SQLALCHEMY_DATABASE_URI": conn_url,
+                "DB_CONNECTION": "mysql",
+                "DB_HOST": my_host,
+                "DB_PORT": my_port,
+                "DB_DATABASE": target_db,
+                "DB_NAME": target_db,
+                "DB_USERNAME": my_user,
+                "DB_USER": my_user,
+                "DB_PASSWORD": my_pass,
+                "MYSQL_HOST": my_host,
+                "MYSQL_PORT": my_port,
+                "MYSQL_DATABASE": target_db,
+                "MYSQL_USER": my_user,
+                "MYSQL_PASSWORD": my_pass,
+            }
+            for k, v in my_vars.items():
+                if k not in merged_env or not merged_env.get(k):
+                    merged_env[k] = v
+
+            log_callback("info", f"[MySQL] Auto-connected project ke MySQL database '{target_db}'.")
+            return merged_env
+
+        # 4. PostgreSQL (Default)
+        return DeploymentEngine.ensure_project_postgres_db(project_name, env_vars, db_config, log_callback)
+
+    @staticmethod
     def ensure_project_postgres_db(
         project_name: str,
         env_vars: Optional[Dict[str, str]],
@@ -245,10 +348,8 @@ class DeploymentEngine:
             "DB_PASSWORD": pg_pass,
         }
 
-        # Override MySQL defaults or missing keys with PostgreSQL auto-connect credentials
-        was_mysql = merged_env.get("DB_CONNECTION", "").lower() == "mysql"
         for k, v in pg_vars.items():
-            if was_mysql or k not in merged_env or not merged_env.get(k) or k in ("DB_CONNECTION", "DB_HOST", "DB_PORT", "DB_DATABASE", "DB_USERNAME", "DB_PASSWORD", "DATABASE_URL"):
+            if k not in merged_env or not merged_env.get(k):
                 merged_env[k] = v
 
         return merged_env
@@ -645,12 +746,15 @@ class DeploymentEngine:
             generated_content = (
                 "FROM php:8.2-cli-alpine\n"
                 "WORKDIR /var/www/html\n"
-                "RUN apk add --no-cache libpq-dev postgresql-client\n"
-                "RUN docker-php-ext-install pdo pdo_pgsql\n"
+                "RUN apk add --no-cache bash curl git unzip libpng-dev libzip-dev libpq-dev mysql-client postgresql-client sqlite-dev oniguruma-dev libxml2-dev\n"
+                "RUN docker-php-ext-install pdo pdo_mysql pdo_pgsql mysqli bcmath mbstring xml zip\n"
+                "RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer\n"
                 "COPY . .\n"
+                "RUN if [ -f composer.json ]; then composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --ignore-platform-reqs || true; fi\n"
+                "RUN mkdir -p storage bootstrap/cache && chmod -R 777 storage bootstrap/cache || true\n"
                 f"ENV PORT={container_port}\n"
                 f"EXPOSE {container_port}\n"
-                f"CMD [\"php\", \"-S\", \"0.0.0.0:{container_port}\", \"-t\", \"public\"]\n"
+                "CMD [\"sh\", \"-c\", \"if [ -f artisan ] && ! grep -q 'APP_KEY=base64' .env; then php artisan key:generate --force || true; fi; php -S 0.0.0.0:${PORT:-80} -t public\"]\n"
             )
         elif os.path.exists(index_html):
             detected_fw = "Static HTML / Web"

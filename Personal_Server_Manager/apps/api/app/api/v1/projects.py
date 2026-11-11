@@ -653,3 +653,133 @@ def provision_project_database_endpoint(
     }
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# DOCKER CONTAINER RUNTIME & TERMINAL LOGS
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/{project_id}/container")
+def get_project_container_status(
+    project_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Retrieve runtime status, health, and state of the Docker container for this project."""
+    p = db.query(Project).filter(Project.id == project_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    from apps.api.app.services.docker_service import DockerEngineService
+
+    matched = DockerEngineService.find_container_by_project(p.name, p.id)
+    if not matched:
+        return {
+            "exists": False,
+            "container_name": p.name,
+            "status": "not_created",
+            "state": "not_created",
+            "running": False,
+            "message": f"Container Docker untuk project '{p.name}' belum aktif atau belum di-deploy.",
+        }
+
+    cid = matched.get("full_id") or matched.get("docker_id") or matched.get("name")
+    inspected = DockerEngineService.inspect_container(cid)
+
+    return {
+        "exists": True,
+        "docker_id": matched.get("docker_id"),
+        "full_id": matched.get("full_id"),
+        "container_name": matched.get("name"),
+        "image": matched.get("image"),
+        "status": matched.get("status"),
+        "state": inspected.get("state", matched.get("state", "unknown")),
+        "running": inspected.get("running", "Up" in matched.get("status", "")),
+        "restarting": inspected.get("restarting", False),
+        "oom_killed": inspected.get("oom_killed", False),
+        "exit_code": inspected.get("exit_code"),
+        "error": inspected.get("error", ""),
+        "started_at": inspected.get("started_at", ""),
+        "finished_at": inspected.get("finished_at", ""),
+        "ports": inspected.get("ports", matched.get("ports", {})),
+        "ip_address": inspected.get("ip_address", ""),
+    }
+
+
+@router.get("/{project_id}/container/logs")
+def get_project_container_logs(
+    project_id: str,
+    tail: int = 200,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Retrieve live stdout & stderr terminal logs directly from the Docker container."""
+    p = db.query(Project).filter(Project.id == project_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    from apps.api.app.services.docker_service import DockerEngineService
+
+    matched = DockerEngineService.find_container_by_project(p.name, p.id)
+    if not matched:
+        return {
+            "container_name": p.name,
+            "exists": False,
+            "status": "not_created",
+            "state": "not_created",
+            "logs": f"[PSM] Container '{p.name}' belum ditemukan di Docker daemon.\nKlik tombol 'Deploy Release' atau 'Deploy Latest' untuk membangun dan meluncurkan container aplikasi.",
+        }
+
+    cid = matched.get("full_id") or matched.get("docker_id") or matched.get("name")
+    raw_logs = DockerEngineService.get_container_logs(cid, tail=tail)
+    inspected = DockerEngineService.inspect_container(cid)
+
+    return {
+        "container_name": matched.get("name"),
+        "docker_id": matched.get("docker_id"),
+        "exists": True,
+        "status": matched.get("status"),
+        "state": inspected.get("state", matched.get("state", "unknown")),
+        "running": inspected.get("running", "Up" in matched.get("status", "")),
+        "exit_code": inspected.get("exit_code"),
+        "error": inspected.get("error", ""),
+        "logs": raw_logs,
+    }
+
+
+@router.post("/{project_id}/container/restart")
+def restart_project_container_endpoint(
+    project_id: str,
+    current_user: User = Depends(require_role("owner", "admin", "operator")),
+    db: Session = Depends(get_db),
+):
+    """Restart the Docker container for this project."""
+    p = db.query(Project).filter(Project.id == project_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    from apps.api.app.services.docker_service import DockerEngineService
+
+    matched = DockerEngineService.find_container_by_project(p.name, p.id)
+    if not matched:
+        raise HTTPException(status_code=404, detail=f"Container untuk '{p.name}' belum dibuat.")
+
+    cid = matched.get("full_id") or matched.get("docker_id") or matched.get("name")
+    success = DockerEngineService.restart_container(cid)
+
+    log_activity(
+        db,
+        action="project.container_restart",
+        resource_type="project",
+        resource_id=project_id,
+        user_id=current_user.id,
+        details={"project": p.name, "container": matched.get("name"), "success": success},
+    )
+
+    if not success:
+        raise HTTPException(status_code=500, detail="Gagal me-restart container.")
+
+    return {
+        "success": True,
+        "message": f"Container '{matched.get('name')}' berhasil di-restart.",
+    }
+
+

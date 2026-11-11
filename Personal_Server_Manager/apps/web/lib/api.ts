@@ -332,6 +332,27 @@ export const api = {
     return res.ok ? res.json() : { databases: [] };
   },
 
+  async getProjectContainer(projectId: string) {
+    const res = await fetchWithAuth(`/api/v1/projects/${projectId}/container`);
+    return res.ok ? res.json() : null;
+  },
+
+  async getProjectContainerLogs(projectId: string, tail = 200) {
+    const res = await fetchWithAuth(`/api/v1/projects/${projectId}/container/logs?tail=${tail}`);
+    return res.ok ? res.json() : { logs: '', status: 'unknown' };
+  },
+
+  async restartProjectContainer(projectId: string) {
+    const res = await fetchWithAuth(`/api/v1/projects/${projectId}/container/restart`, {
+      method: 'POST',
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to restart container');
+    }
+    return res.json();
+  },
+
   // Deployments
   async getDeployments() {
     const res = await fetchWithAuth('/api/v1/deployments');

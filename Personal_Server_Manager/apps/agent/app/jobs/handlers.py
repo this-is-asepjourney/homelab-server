@@ -85,8 +85,8 @@ def handle_deployment_git(payload: Dict[str, Any], log_cb: Callable) -> Dict[str
     if not cloned:
         raise RuntimeError("Gagal clone atau pull git repository")
 
-    # 2. Ensure PostgreSQL database exists & auto-connect environment secrets
-    merged_env = DeploymentEngine.ensure_project_postgres_db(project_name, env_vars, db_config, log_cb)
+    # 2. Ensure project database exists & auto-connect environment secrets
+    merged_env = DeploymentEngine.ensure_project_db(project_name, env_vars, db_config, log_cb)
     log_cb("info", f"[Deploy] Menyiapkan {len(merged_env)} variabel environment ke .env...")
     DeploymentEngine.write_env_file(target_dir, merged_env)
 
@@ -144,7 +144,7 @@ def handle_deployment_zip(payload: Dict[str, Any], log_cb: Callable) -> Dict[str
     log_cb("info", f"[Deploy] Mengekstrak paket ZIP ke workspace {target_dir}...")
     DeploymentEngine.safe_extract_zip(zip_path, target_dir)
 
-    merged_env = DeploymentEngine.ensure_project_postgres_db(project_name, env_vars, db_config, log_cb)
+    merged_env = DeploymentEngine.ensure_project_db(project_name, env_vars, db_config, log_cb)
     log_cb("info", f"[Deploy] Menyiapkan {len(merged_env)} variabel environment ke .env...")
     DeploymentEngine.write_env_file(target_dir, merged_env)
 
