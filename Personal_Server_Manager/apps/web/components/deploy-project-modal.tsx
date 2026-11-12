@@ -28,6 +28,7 @@ import {
   Sparkles,
   HelpCircle,
   AlertCircle,
+  Loader2,
 } from 'lucide-react';
 import { api, formatBytes } from '../lib/api';
 
@@ -95,6 +96,7 @@ export function DeployProjectModal({
 
   // Step 3: Environment & Flexible DB
   const [dbType, setDbType] = useState<'postgres' | 'mysql' | 'sqlite' | 'none'>(existingProject?.db_type || 'postgres');
+  const [userHasCustomizedDb, setUserHasCustomizedDb] = useState(false);
   const [envMode, setEnvMode] = useState<'table' | 'raw'>('table');
   const [envRows, setEnvRows] = useState<Array<{ key: string; value: string; isSecret?: boolean }>>([
     { key: 'NODE_ENV', value: 'production', isSecret: false },
@@ -217,15 +219,15 @@ export function DeployProjectModal({
       applyPortPreset(safeHp, '3000');
     } else if (fw === 'FastAPI' || fw === 'Django / Python') {
       applyPortPreset(safeHp, '8000');
-      setDbType('postgres');
+      if (!userHasCustomizedDb && !existingProject) setDbType('postgres');
     } else if (fw === 'Laravel' || fw === 'PHP') {
       applyPortPreset(safeHp, '8080');
-      setDbType('mysql');
+      if (!userHasCustomizedDb && !existingProject) setDbType('mysql');
     } else if (fw === 'Flask') {
       applyPortPreset(safeHp, '5000');
     } else if (fw === 'Static HTML') {
       applyPortPreset(safeHp, '80');
-      setDbType('none');
+      if (!userHasCustomizedDb && !existingProject) setDbType('none');
     }
   };
 
@@ -372,16 +374,43 @@ export function DeployProjectModal({
       const portString = compilePortMappings();
       const envVariables = compileEnvVars();
 
-      // If existing project: trigger deployment directly
+      // If existing project: update project configuration & trigger redeployment
       if (existingProject) {
-        setDeployStatusText('Updating project configuration and launching container...');
+        setDeployStatusText('Menyimpan perubahan konfigurasi & menyiapkan rilis baru...');
+        try {
+          await api.updateProject(existingProject.id, {
+            name: name.trim() || undefined,
+            framework,
+            repository_url: sourceType === 'git' ? (repositoryUrl.trim() || undefined) : undefined,
+            branch: sourceType === 'git' ? (branch || 'main') : undefined,
+            domain: domain.trim() || undefined,
+            db_type: dbType,
+            port_mappings: portString,
+            db_name: customDbName.trim() || undefined,
+          });
+        } catch (_) {}
+
+        if (envVariables && envVariables.length > 0) {
+          try {
+            await api.updateProjectEnvironment(existingProject.id, envVariables);
+          } catch (_) {}
+        }
+
+        setDeployStatusText('Meluncurkan container release baru di server...');
         if (sourceType === 'upload' && zipFile) {
-          const dep = await api.uploadZipDeployment(existingProject.id, zipFile, portString, envVariables);
+          const dep = await api.uploadZipDeployment(existingProject.id, zipFile, portString, envVariables, dbType);
           onClose();
+          if (onSuccess) onSuccess(dep);
+          router.push(`/deployments/${dep.id}`);
+        } else if (sourceType === 'upload' && !zipFile) {
+          const dep = await api.redeployProject(existingProject.id);
+          onClose();
+          if (onSuccess) onSuccess(dep);
           router.push(`/deployments/${dep.id}`);
         } else {
-          const dep = await api.triggerGitDeployment(existingProject.id, branch || 'main', portString, envVariables);
+          const dep = await api.triggerGitDeployment(existingProject.id, branch || 'main', portString, envVariables, dbType);
           onClose();
+          if (onSuccess) onSuccess(dep);
           router.push(`/deployments/${dep.id}`);
         }
         return;
@@ -410,7 +439,7 @@ export function DeployProjectModal({
 
       if (sourceType === 'upload' && zipFile) {
         setDeployStatusText('Uploading ZIP archive & initiating Docker build...');
-        const dep = await api.uploadZipDeployment(created.id, zipFile, portString, envVariables);
+        const dep = await api.uploadZipDeployment(created.id, zipFile, portString, envVariables, dbType);
         onClose();
         if (onSuccess) onSuccess(created);
         router.push(`/deployments/${dep.id}`);
@@ -445,13 +474,15 @@ export function DeployProjectModal({
             </div>
             <div>
               <h2 className="font-bold text-base text-foreground flex items-center gap-2">
-                <span>{existingProject ? `Deploy Release • ${existingProject.name}` : 'Deploy Project ke Docker'}</span>
+                <span>{existingProject ? `Edit & Deploy Ulang • ${name || existingProject.name}` : 'Deploy Project ke Docker'}</span>
                 <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-500/10 text-blue-500 border border-blue-500/20 uppercase tracking-wide">
-                  Fast Docker Pipeline
+                  {existingProject ? 'Redeploy Mode' : 'Fast Docker Pipeline'}
                 </span>
               </h2>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Langkah mudah deploy container via Git atau ZIP dengan port mapping & environment variables.
+                {existingProject
+                  ? 'Sesuaikan konfigurasi repositori, port, database engine, atau environment variables lalu luncurkan rilis baru.'
+                  : 'Langkah mudah deploy container via Git atau ZIP dengan port mapping & environment variables.'}
               </p>
             </div>
           </div>
@@ -504,7 +535,68 @@ export function DeployProjectModal({
             </div>
           )}
 
-          {/* STEP 1: SOURCE PROJECT */}
+          {deploying ? (
+            <div className="py-8 px-4 flex flex-col items-center justify-center text-center space-y-6 animate-in fade-in duration-200">
+              <div className="relative">
+                <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-blue-600/20 to-indigo-600/20 border border-blue-500/30 flex items-center justify-center shadow-xl shadow-blue-500/10">
+                  <Rocket className="w-10 h-10 animate-bounce text-blue-500" />
+                </div>
+                <div className="absolute -bottom-1 -right-1 p-1.5 bg-card rounded-full border border-border shadow-md">
+                  <Loader2 className="w-4 h-4 text-indigo-500 animate-spin" />
+                </div>
+              </div>
+
+              <div className="space-y-1.5 max-w-md">
+                <h3 className="text-base font-bold text-foreground">
+                  Menginisialisasi Deployment ke Docker
+                </h3>
+                <p className="text-xs text-gray-400">
+                  {deployStatusText || 'Sedang menyiapkan container & pipeline build...'}
+                </p>
+              </div>
+
+              {/* Informative Step Tracker */}
+              <div className="w-full max-w-md bg-background/80 border border-border rounded-2xl p-4 text-xs space-y-3 text-left shadow-inner">
+                <div className="flex items-center justify-between text-[11px] font-mono">
+                  <span className="text-gray-400">Proses Pipeline Inisiasi</span>
+                  <span className="text-blue-500 font-bold flex items-center gap-1">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    Sedang Berjalan
+                  </span>
+                </div>
+
+                <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-400 rounded-full animate-pulse w-4/5" />
+                </div>
+
+                <div className="space-y-2 pt-1 text-[11px]">
+                  <div className="flex items-center gap-2 text-emerald-500">
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                    <span>Verifikasi port host :{hostPort} & port container :{containerPort} (Lolos)</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-emerald-500">
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                    <span>Konfigurasi environment & database auto-wiring (Tersiap)</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-blue-400 font-medium">
+                    <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin text-blue-500" />
+                    <span>{deployStatusText || 'Mendaftarkan job ke worker agent Docker...'}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-gray-500">
+                    <div className="w-3.5 h-3.5 rounded-full border border-gray-600 flex items-center justify-center text-[9px] text-gray-400">4</div>
+                    <span>Streaming log langsung pada layar deployment console</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="text-[11px] text-gray-500 flex items-center gap-1.5 font-mono">
+                <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                <span>Otomatis berpindah ke live terminal stream begitu container mulai di-build...</span>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* STEP 1: SOURCE PROJECT */}
           {currentStep === 1 && (
             <div className="space-y-5 animate-in fade-in duration-150">
               {/* Source Type Selector */}
@@ -994,6 +1086,7 @@ export function DeployProjectModal({
                       type="button"
                       onClick={() => {
                         setDbType(engine.id as any);
+                        setUserHasCustomizedDb(true);
                         setAutoProvisionDb(engine.id !== 'none');
                       }}
                       className={`p-3 rounded-xl border text-left flex flex-col justify-between transition-all ${
@@ -1233,22 +1326,11 @@ export function DeployProjectModal({
                   </button>
                 </div>
               </div>
-
-              {/* Progress Callout when deploying */}
-              {deploying && (
-                <div className="p-4 rounded-xl border border-blue-500/40 bg-blue-500/10 space-y-2 animate-pulse text-xs">
-                  <div className="flex items-center gap-2 font-semibold text-blue-500">
-                    <Rocket className="w-4 h-4 animate-spin" />
-                    <span>{deployStatusText || 'Sedang memproses deployment...'}</span>
-                  </div>
-                  <p className="text-[11px] text-gray-400">
-                    Harap tunggu sejenak, container Docker Anda sedang disiapkan dan log build akan terbuka otomatis.
-                  </p>
-                </div>
-              )}
             </div>
           )}
-        </div>
+        </>
+      )}
+    </div>
 
         {/* Footer Actions */}
         <div className="px-6 py-4 border-t border-border bg-card/80 backdrop-blur-sm flex items-center justify-between">
@@ -1310,7 +1392,13 @@ export function DeployProjectModal({
                 className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold shadow-lg shadow-blue-600/25 transition-all disabled:opacity-50"
               >
                 <Rocket className={`w-4 h-4 ${deploying ? 'animate-bounce' : ''}`} />
-                <span>{deploying ? 'Deploying ke Docker...' : '🚀 Deploy Project Sekarang'}</span>
+                <span>
+                  {deploying
+                    ? (deployStatusText || 'Memproses deployment...')
+                    : existingProject
+                    ? '🚀 Simpan & Deploy Ulang ke Server'
+                    : '🚀 Deploy Project Sekarang'}
+                </span>
               </button>
             )}
           </div>

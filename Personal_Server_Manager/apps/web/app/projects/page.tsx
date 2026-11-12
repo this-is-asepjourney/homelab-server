@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   FolderGit2,
   Plus,
@@ -19,6 +20,7 @@ import { api } from '../../lib/api';
 import { DeployProjectModal } from '../../components/deploy-project-modal';
 
 export default function ProjectsPage() {
+  const router = useRouter();
   const [projects, setProjects] = useState<any[]>([]);
   const [servers, setServers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,6 +28,7 @@ export default function ProjectsPage() {
   // Deploy Modal states
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedProjectForDeploy, setSelectedProjectForDeploy] = useState<any | null>(null);
+  const [redeployingProjectId, setRedeployingProjectId] = useState<string | null>(null);
 
   const loadData = async () => {
     try {
@@ -53,6 +56,18 @@ export default function ProjectsPage() {
   const handleOpenDeployReleaseModal = (proj: any) => {
     setSelectedProjectForDeploy(proj);
     setModalOpen(true);
+  };
+
+  const handleQuickRedeploy = async (projectId: string) => {
+    try {
+      setRedeployingProjectId(projectId);
+      const dep = await api.redeployProject(projectId);
+      router.push(`/deployments/${dep.id}`);
+    } catch (err: any) {
+      alert(err.message || 'Gagal memicu deploy ulang project ke server');
+    } finally {
+      setRedeployingProjectId(null);
+    }
   };
 
   const handleDelete = async (id: string, projName: string) => {
@@ -205,20 +220,28 @@ export default function ProjectsPage() {
                 </div>
 
                 <div className="mt-4 pt-3 border-t border-border flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <button
                       onClick={() => handleOpenDeployReleaseModal(p)}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium shadow-sm transition-colors"
-                      title="Deploy release baru"
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20 text-blue-500 text-xs font-semibold transition-all"
+                      title="Edit konfigurasi lalu deploy ulang ke server"
                     >
-                      <Rocket className="w-3 h-3" />
-                      <span>Deploy</span>
+                      <span>Edit &amp; Deploy</span>
+                    </button>
+                    <button
+                      onClick={() => handleQuickRedeploy(p.id)}
+                      disabled={redeployingProjectId === p.id}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-sm transition-all disabled:opacity-50"
+                      title="Deploy ulang rilis project langsung ke server"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${redeployingProjectId === p.id ? 'animate-spin' : ''}`} />
+                      <span>{redeployingProjectId === p.id ? 'Deploying...' : 'Deploy Ulang'}</span>
                     </button>
                     <Link
                       href={`/projects/${p.id}`}
                       className="px-2.5 py-1.5 rounded-lg border border-border hover:bg-background text-gray-400 hover:text-foreground text-xs font-medium transition-colors"
                     >
-                      Manage
+                      Detail
                     </Link>
                   </div>
 
@@ -239,10 +262,21 @@ export default function ProjectsPage() {
       {/* Modern 4-Step Deploy Modal */}
       <DeployProjectModal
         isOpen={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => {
+          setModalOpen(false);
+          setSelectedProjectForDeploy(null);
+        }}
         servers={servers}
         existingProject={selectedProjectForDeploy}
-        onSuccess={() => loadData()}
+        onSuccess={(result) => {
+          setModalOpen(false);
+          setSelectedProjectForDeploy(null);
+          if (result && result.id) {
+            router.push(`/deployments/${result.id}`);
+          } else {
+            loadData();
+          }
+        }}
       />
     </div>
   );

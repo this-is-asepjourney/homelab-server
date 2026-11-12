@@ -78,19 +78,22 @@ def handle_deployment_git(payload: Dict[str, Any], log_cb: Callable) -> Dict[str
     db_config = payload.get("database_config", {})
 
     target_dir = os.path.join(agent_settings.WORKSPACE_DIR, project_id)
-    log_cb("info", f"[Deploy] Memulai deployment Git untuk project '{project_name}'...")
+    log_cb("info", f"[STAGE:1/5] Mempersiapkan Source Code: Mengambil repository Git {repo_url} (branch: {branch})...")
 
     # 1. Clone or pull repository
     cloned = DeploymentEngine.clone_or_pull_git(repo_url, branch, target_dir, log_cb, commit_hash=commit_hash)
     if not cloned:
+        log_cb("error", "[STAGE:FAILED] Gagal melakukan clone atau fetch repository Git.")
         raise RuntimeError("Gagal clone atau pull git repository")
 
     # 2. Ensure project database exists & auto-connect environment secrets
+    log_cb("info", f"[STAGE:2/5] Konfigurasi Environment & Database: Mengamankan variabel .env dan auto-provisioning database...")
     merged_env = DeploymentEngine.ensure_project_db(project_name, env_vars, db_config, log_cb, workspace_dir=target_dir)
-    log_cb("info", f"[Deploy] Menyiapkan {len(merged_env)} variabel environment ke .env...")
+    log_cb("info", f"[Deploy] Menyiapkan {len(merged_env)} variabel environment ke file .env...")
     DeploymentEngine.write_env_file(target_dir, merged_env)
 
-    # 3. Determine target container port from port_mappings
+    # 3. Determine target container port from port_mappings & inspect Dockerfile
+    log_cb("info", f"[STAGE:3/5] Dockerfile & Context Guard: Memeriksa Dockerfile dan menyusun .dockerignore context...")
     _, _, container_port = DeploymentEngine.parse_port_mappings(
         explicit_mappings=port_mappings,
         full_df_path=os.path.join(target_dir, dockerfile_path),
@@ -98,7 +101,6 @@ def handle_deployment_git(payload: Dict[str, Any], log_cb: Callable) -> Dict[str
         log_callback=lambda *_: None
     )
 
-    # 4. Check for Compose vs Dockerfile (auto-generating if missing)
     resolved_path = DeploymentEngine.ensure_dockerfile_or_generate(
         workspace_dir=target_dir,
         dockerfile_path=dockerfile_path,
@@ -108,25 +110,30 @@ def handle_deployment_git(payload: Dict[str, Any], log_cb: Callable) -> Dict[str
         fallback_framework=payload.get("framework", "auto"),
     )
 
+    # 4 & 5. Build Image & Run Container
+    target_db_type = db_config.get("db_type") or payload.get("db_type") or merged_env.get("DB_CONNECTION") or "auto"
     deployed = False
     if resolved_path == compose_path or resolved_path.endswith(".yml") or resolved_path.endswith(".yaml"):
-        log_cb("info", f"[Deploy] Menjalankan Docker Compose stack dari '{resolved_path}'...")
+        log_cb("info", f"[STAGE:4/5] Membangun & Menjalankan Stack Compose dari '{resolved_path}'...")
         deployed = DeploymentEngine.build_and_deploy_compose(target_dir, resolved_path, log_cb)
     else:
-        log_cb("info", f"[Deploy] Membangun image dan menjalankan container Docker dari '{resolved_path}'...")
+        log_cb("info", f"[STAGE:4/5] Membangun Docker Image: Mengompilasi instruksi build dari '{resolved_path}'...")
         deployed = DeploymentEngine.build_and_run_dockerfile(
             workspace_dir=target_dir,
             dockerfile_path=resolved_path,
             image_tag=image_tag,
             container_name=project_name,
             log_callback=log_cb,
-            port_mappings=port_mappings
+            port_mappings=port_mappings,
+            db_type=target_db_type,
         )
 
     if not deployed:
+        log_cb("error", f"[STAGE:FAILED] Proses build image atau peluncuran container '{project_name}' gagal.")
         raise RuntimeError("Proses build atau peluncuran container gagal. Lihat log deployment.")
 
-    log_cb("info", f"[Deploy] Project '{project_name}' berhasil di-deploy ke Docker!")
+    log_cb("info", f"[STAGE:5/5] Meluncurkan Container & Healthcheck: Container '{project_name}' aktif di jaringan.")
+    log_cb("info", f"[STAGE:DONE] Deployment selesai dengan sukses! Layanan '{project_name}' siap menerima koneksi.")
     return {"success": True, "workspace": target_dir, "image_tag": image_tag}
 
 def handle_deployment_zip(payload: Dict[str, Any], log_cb: Callable) -> Dict[str, Any]:
@@ -142,14 +149,15 @@ def handle_deployment_zip(payload: Dict[str, Any], log_cb: Callable) -> Dict[str
 
     target_dir = os.path.join(agent_settings.WORKSPACE_DIR, project_id)
 
-    log_cb("info", f"[Deploy] Mengekstrak paket ZIP ke workspace {target_dir}...")
+    log_cb("info", f"[STAGE:1/5] Mempersiapkan Source Code: Mengekstrak paket ZIP ke workspace {target_dir}...")
     DeploymentEngine.safe_extract_zip(zip_path, target_dir)
 
+    log_cb("info", f"[STAGE:2/5] Konfigurasi Environment & Database: Mengamankan variabel .env dan auto-provisioning database...")
     merged_env = DeploymentEngine.ensure_project_db(project_name, env_vars, db_config, log_cb, workspace_dir=target_dir)
-    log_cb("info", f"[Deploy] Menyiapkan {len(merged_env)} variabel environment ke .env...")
+    log_cb("info", f"[Deploy] Menyiapkan {len(merged_env)} variabel environment ke file .env...")
     DeploymentEngine.write_env_file(target_dir, merged_env)
 
-    # Determine target container port from port_mappings
+    log_cb("info", f"[STAGE:3/5] Dockerfile & Context Guard: Memeriksa Dockerfile dan menyusun .dockerignore context...")
     _, _, container_port = DeploymentEngine.parse_port_mappings(
         explicit_mappings=port_mappings,
         full_df_path=os.path.join(target_dir, dockerfile_path),
@@ -167,24 +175,28 @@ def handle_deployment_zip(payload: Dict[str, Any], log_cb: Callable) -> Dict[str
     )
 
     deployed = False
+    target_db_type = db_config.get("db_type") or payload.get("db_type") or merged_env.get("DB_CONNECTION") or "auto"
     if resolved_path == compose_path or resolved_path.endswith(".yml") or resolved_path.endswith(".yaml"):
-        log_cb("info", f"[Deploy] Menjalankan Docker Compose stack dari '{resolved_path}'...")
+        log_cb("info", f"[STAGE:4/5] Membangun & Menjalankan Stack Compose dari '{resolved_path}'...")
         deployed = DeploymentEngine.build_and_deploy_compose(target_dir, resolved_path, log_cb)
     else:
-        log_cb("info", f"[Deploy] Membangun image Docker dan meluncurkan container...")
+        log_cb("info", f"[STAGE:4/5] Membangun Docker Image: Mengompilasi instruksi build dari '{resolved_path}'...")
         deployed = DeploymentEngine.build_and_run_dockerfile(
             workspace_dir=target_dir,
             dockerfile_path=resolved_path,
             image_tag=image_tag,
             container_name=project_name,
             log_callback=log_cb,
-            port_mappings=port_mappings
+            port_mappings=port_mappings,
+            db_type=target_db_type,
         )
 
     if not deployed:
+        log_cb("error", f"[STAGE:FAILED] Proses build image atau peluncuran container ZIP '{project_name}' gagal.")
         raise RuntimeError("Proses build atau peluncuran container ZIP gagal")
 
-    log_cb("info", f"[Deploy] Project '{project_name}' ZIP berhasil di-deploy ke Docker!")
+    log_cb("info", f"[STAGE:5/5] Meluncurkan Container & Healthcheck: Container '{project_name}' aktif di jaringan.")
+    log_cb("info", f"[STAGE:DONE] Deployment selesai dengan sukses! Layanan '{project_name}' siap menerima koneksi.")
     return {"success": True, "workspace": target_dir}
 
 def handle_deployment_rollback(payload: Dict[str, Any], log_cb: Callable) -> Dict[str, Any]:

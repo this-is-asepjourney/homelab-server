@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -204,7 +205,7 @@ async def create_project(
                 db.add(db_var)
         db.commit()
 
-    # Auto-provision & auto-connect PostgreSQL database for the project
+    # Auto-provision & auto-connect database for the project (respecting explicit db_type)
     db_info = {}
     if getattr(payload, "auto_provision_db", True):
         try:
@@ -212,6 +213,7 @@ async def create_project(
                 db=db,
                 project=project,
                 custom_db_name=getattr(payload, "database_name", None),
+                db_type=project.db_type,
                 override_existing_env=True,
             )
         except Exception:
@@ -283,6 +285,7 @@ async def create_project(
                 "port_mappings": project.port_mappings or "3000:3000",
                 "image_tag": image_tag,
                 "version": version,
+                "db_type": project.db_type,
                 "environment_variables": full_env,
                 "database_config": db_info,
             }
@@ -368,8 +371,137 @@ def get_project(
         created_at=p.created_at
     )
 
+async def execute_project_redeploy(
+    db: Session,
+    project: Project,
+    current_user_id: str
+) -> DeploymentResponse:
+    src = project.source
+    last_deployment = db.query(Deployment).filter(
+        Deployment.project_id == project.id
+    ).order_by(Deployment.version.desc()).first()
+    version = (last_deployment.version + 1) if (last_deployment and last_deployment.version) else 1
+
+    clean_proj_name = project.name.lower().replace(" ", "-")
+    image_tag = f"{clean_proj_name}:v{version}"
+    now = datetime.now(timezone.utc)
+
+    deployment = Deployment(
+        project_id=project.id,
+        version=version,
+        commit_hash="HEAD" if (src and src.repository_url) else None,
+        image_tag=image_tag,
+        status="building",
+        triggered_by=current_user_id,
+        started_at=now
+    )
+    db.add(deployment)
+    db.commit()
+    db.refresh(deployment)
+
+    source_desc = f"Git ({src.repository_url} @ {src.branch or 'main'})" if (src and src.repository_url) else "Server Archive"
+    initial_log = DeploymentLog(
+        deployment_id=deployment.id,
+        sequence=1,
+        level="info",
+        message=f"Deployment v{version} triggered via Project Update / Redeploy to Server ({source_desc})"
+    )
+    db.add(initial_log)
+    db.commit()
+
+    # Auto-provision & auto-connect database respecting explicit db_type
+    db_info, env_vars = provision_and_sync_project_db(
+        db, project, custom_db_name=project.db_name, db_type=project.db_type, override_existing_env=True
+    )
+
+    # Collect all stored decrypted environment variables
+    env_items = db.query(EnvironmentVariable).filter(EnvironmentVariable.project_id == project.id).all()
+    full_env = dict(env_vars or {})
+    for item in env_items:
+        try:
+            full_env[item.key] = decrypt_secret(item.encrypted_value)
+        except Exception:
+            pass
+
+    # Build job payload depending on source type
+    if src and src.repository_url:
+        job_type = "deployment.git"
+        job_payload = {
+            "deployment_id": deployment.id,
+            "project_id": project.id,
+            "project_name": project.name,
+            "framework": project.framework,
+            "repository_url": src.repository_url,
+            "branch": src.branch or "main",
+            "commit_hash": None,
+            "dockerfile_path": src.dockerfile_path or "Dockerfile",
+            "compose_path": src.compose_path or "docker-compose.yml",
+            "port_mappings": project.port_mappings or "3000:3000",
+            "image_tag": image_tag,
+            "version": version,
+            "db_type": project.db_type,
+            "environment_variables": full_env,
+            "database_config": db_info,
+        }
+    elif src and src.upload_object_key and os.path.exists(src.upload_object_key):
+        job_type = "deployment.zip"
+        job_payload = {
+            "deployment_id": deployment.id,
+            "project_id": project.id,
+            "project_name": project.name,
+            "framework": project.framework,
+            "zip_path": src.upload_object_key,
+            "image_tag": image_tag,
+            "version": version,
+            "dockerfile_path": src.dockerfile_path or "Dockerfile",
+            "compose_path": src.compose_path or "docker-compose.yml",
+            "port_mappings": project.port_mappings or "3000:3000",
+            "db_type": project.db_type,
+            "environment_variables": full_env,
+            "database_config": db_info,
+        }
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Project tidak memiliki repositori Git maupun file archive ZIP yang tersimpan di server. Silakan deploy rilis baru dengan Git atau upload file ZIP terlebih dahulu."
+        )
+
+    job = await create_and_dispatch_job(
+        db=db,
+        server_id=project.server_id,
+        job_type=job_type,
+        payload=job_payload,
+        deployment_id=deployment.id,
+        priority=20
+    )
+
+    log_activity(
+        db,
+        action="project.redeploy",
+        resource_type="deployment",
+        resource_id=deployment.id,
+        user_id=current_user_id,
+        details={"project": project.name, "version": version, "job_id": job.id, "job_type": job_type}
+    )
+
+    return DeploymentResponse(
+        id=deployment.id,
+        project_id=project.id,
+        project_name=project.name,
+        version=version,
+        commit_hash=deployment.commit_hash,
+        image_tag=deployment.image_tag,
+        status=deployment.status,
+        triggered_by=current_user_id,
+        started_at=deployment.started_at,
+        finished_at=None,
+        duration_seconds=0,
+        created_at=deployment.created_at,
+    )
+
+
 @router.patch("/{project_id}", response_model=ProjectResponse)
-def update_project(
+async def update_project(
     project_id: str,
     payload: ProjectUpdate,
     current_user: User = Depends(require_role("owner", "admin")),
@@ -391,6 +523,18 @@ def update_project(
         p.domain = payload.domain.strip().lower() if payload.domain else None
     if payload.db_type is not None:
         p.db_type = payload.db_type
+        # Immediately re-provision and sync environment variables when database engine is updated
+        try:
+            from apps.api.app.services.db_provision_service import provision_and_sync_project_db
+            provision_and_sync_project_db(
+                db=db,
+                project=p,
+                custom_db_name=payload.db_name or p.db_name,
+                db_type=p.db_type,
+                override_existing_env=True
+            )
+        except Exception:
+            pass
     if payload.db_name is not None:
         p.db_name = payload.db_name
 
@@ -429,7 +573,35 @@ def update_project(
         resource_id=p.id,
         user_id=current_user.id
     )
-    return get_project(project_id=project_id, current_user=current_user, db=db)
+
+    deployment_id = None
+    if payload.redeploy:
+        try:
+            dep = await execute_project_redeploy(db=db, project=p, current_user_id=current_user.id)
+            deployment_id = dep.id
+        except Exception:
+            pass
+
+    resp = get_project(project_id=project_id, current_user=current_user, db=db)
+    if deployment_id:
+        resp.deployment_id = deployment_id
+    return resp
+
+
+@router.post("/{project_id}/redeploy", response_model=DeploymentResponse)
+async def redeploy_project(
+    project_id: str,
+    current_user: User = Depends(require_role("owner", "admin", "operator")),
+    db: Session = Depends(get_db)
+):
+    """
+    Trigger immediate redeployment of project to the server container
+    using current settings, database configuration, and environment variables.
+    """
+    p = db.query(Project).filter(Project.id == project_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return await execute_project_redeploy(db=db, project=p, current_user_id=current_user.id)
 
 @router.delete("/{project_id}")
 def delete_project(

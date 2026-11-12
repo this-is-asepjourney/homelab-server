@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   Rocket,
   RefreshCw,
@@ -10,15 +11,19 @@ import {
   XCircle,
   RotateCcw,
   Plus,
+  FileCode2,
 } from 'lucide-react';
 import { api, formatDuration } from '../../lib/api';
 import { DeployProjectModal } from '../../components/deploy-project-modal';
 
 export default function DeploymentsPage() {
+  const router = useRouter();
   const [deployments, setDeployments] = useState<any[]>([]);
   const [servers, setServers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
+  const [selectedProjectForDeploy, setSelectedProjectForDeploy] = useState<any | null>(null);
+  const [redeployingId, setRedeployingId] = useState<string | null>(null);
 
   const loadDeployments = async () => {
     try {
@@ -39,6 +44,30 @@ export default function DeploymentsPage() {
     loadDeployments();
   }, []);
 
+  const handleRedeploy = async (d: any) => {
+    if (!d?.project_id) return;
+    try {
+      setRedeployingId(d.id);
+      const newDep = await api.redeployProject(d.project_id);
+      router.push(`/deployments/${newDep.id}`);
+    } catch (err: any) {
+      alert(err.message || 'Gagal deploy ulang rilis ke server');
+    } finally {
+      setRedeployingId(null);
+    }
+  };
+
+  const handleEditAndDeploy = async (d: any) => {
+    if (!d?.project_id) return;
+    try {
+      const proj = await api.getProject(d.project_id);
+      setSelectedProjectForDeploy(proj);
+      setModalOpen(true);
+    } catch (err: any) {
+      alert(err.message || 'Gagal memuat data project');
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -46,7 +75,7 @@ export default function DeploymentsPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Deployment Center</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Audit releases, view live build logs, and manage rollbacks across projects.
+            Audit rilis container Docker, monitor live logs, dan lakukan Edit &amp; Deploy Ulang langsung ke server.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -58,7 +87,10 @@ export default function DeploymentsPage() {
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
           <button
-            onClick={() => setModalOpen(true)}
+            onClick={() => {
+              setSelectedProjectForDeploy(null);
+              setModalOpen(true);
+            }}
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-md shadow-blue-600/20 transition-all"
           >
             <Rocket className="w-4 h-4" />
@@ -86,7 +118,7 @@ export default function DeploymentsPage() {
               {deployments.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="p-8 text-center text-gray-500">
-                    No deployments recorded yet.
+                    Belum ada riwayat deployment tercatat.
                   </td>
                 </tr>
               ) : (
@@ -122,13 +154,29 @@ export default function DeploymentsPage() {
                     <td className="p-3.5 text-gray-400">
                       {new Date(d.created_at).toLocaleString()}
                     </td>
-                    <td className="p-3.5 text-right">
+                    <td className="p-3.5 text-right space-x-1.5 whitespace-nowrap">
                       <Link
                         href={`/deployments/${d.id}`}
-                        className="px-3 py-1.5 rounded-lg bg-blue-600/10 hover:bg-blue-600/20 text-blue-600 dark:text-blue-400 font-medium transition-colors"
+                        className="px-2.5 py-1.5 rounded-lg border border-border hover:bg-card text-foreground font-medium transition-colors"
                       >
-                        View Logs
+                        Logs
                       </Link>
+                      <button
+                        onClick={() => handleEditAndDeploy(d)}
+                        className="px-2.5 py-1.5 rounded-lg border border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20 text-blue-500 font-semibold transition-colors"
+                        title="Edit konfigurasi lalu deploy ulang ke server"
+                      >
+                        Edit &amp; Deploy
+                      </button>
+                      <button
+                        onClick={() => handleRedeploy(d)}
+                        disabled={redeployingId === d.id}
+                        className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-sm transition-colors disabled:opacity-50 inline-flex items-center gap-1"
+                        title="Deploy ulang rilis project ini langsung ke server"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${redeployingId === d.id ? 'animate-spin' : ''}`} />
+                        <span>{redeployingId === d.id ? 'Deploying...' : 'Deploy Ulang'}</span>
+                      </button>
                     </td>
                   </tr>
                 ))
@@ -140,11 +188,22 @@ export default function DeploymentsPage() {
 
       <DeployProjectModal
         isOpen={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => {
+          setModalOpen(false);
+          setSelectedProjectForDeploy(null);
+        }}
         servers={servers}
-        onSuccess={() => loadDeployments()}
+        existingProject={selectedProjectForDeploy}
+        onSuccess={(result) => {
+          setModalOpen(false);
+          setSelectedProjectForDeploy(null);
+          if (result?.id) {
+            router.push(`/deployments/${result.id}`);
+          } else {
+            loadDeployments();
+          }
+        }}
       />
     </div>
   );
 }
-

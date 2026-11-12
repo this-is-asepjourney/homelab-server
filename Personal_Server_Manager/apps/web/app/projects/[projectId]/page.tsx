@@ -29,6 +29,7 @@ import {
   Download,
   Eye,
   Sparkles,
+  Save,
 } from 'lucide-react';
 import { api, formatBytes } from '../../../lib/api';
 import { DeployProjectModal } from '../../../components/deploy-project-modal';
@@ -79,6 +80,18 @@ export default function ProjectDetailPage() {
   const [newKey, setNewKey] = useState('');
   const [newValue, setNewValue] = useState('');
 
+  // Project settings & server deploy state
+  const [projectName, setProjectName] = useState('');
+  const [projectDescription, setProjectDescription] = useState('');
+  const [projectFramework, setProjectFramework] = useState('Next.js');
+  const [projectDomain, setProjectDomain] = useState('');
+  const [projectBranch, setProjectBranch] = useState('main');
+  const [projectRepoUrl, setProjectRepoUrl] = useState('');
+  const [projectDockerfilePath, setProjectDockerfilePath] = useState('Dockerfile');
+  const [savingProjectSettings, setSavingProjectSettings] = useState(false);
+  const [deployingToServer, setDeployingToServer] = useState(false);
+  const [projectUpdateSuccessMsg, setProjectUpdateSuccessMsg] = useState('');
+
   const fetchContainerLogs = async () => {
     try {
       setLoadingLogs(true);
@@ -120,6 +133,13 @@ export default function ProjectDetailPage() {
         api.getProjectContainerLogs(projectId, 250).catch(() => ({ logs: '' })),
       ]);
       setProject(p);
+      setProjectName(p?.name || '');
+      setProjectDescription(p?.description || '');
+      setProjectFramework(p?.framework || 'Next.js');
+      setProjectDomain(p?.domain || '');
+      setProjectBranch(p?.branch || 'main');
+      setProjectRepoUrl(p?.repository_url || '');
+      setProjectDockerfilePath(p?.dockerfile_path || 'Dockerfile');
       setDeployments(d);
       setEnvVars(env);
       setDbInfo(dbData);
@@ -231,7 +251,7 @@ export default function ProjectDetailPage() {
   const handleTriggerDeploy = async () => {
     try {
       setDeploying(true);
-      const dep = await api.triggerGitDeployment(projectId, project?.branch || 'main');
+      const dep = await api.redeployProject(projectId);
       router.push(`/deployments/${dep.id}`);
     } catch (err: any) {
       alert(err.message || 'Deployment trigger failed');
@@ -244,11 +264,56 @@ export default function ProjectDetailPage() {
     if (!file) return;
     try {
       setDeploying(true);
-      const dep = await api.uploadZipDeployment(projectId, file);
+      const dep = await api.uploadZipDeployment(projectId, file, portMappingsInput, undefined, selectedDbType);
       router.push(`/deployments/${dep.id}`);
     } catch (err: any) {
       alert(err.message || 'ZIP upload deployment failed');
       setDeploying(false);
+    }
+  };
+
+  const handleUpdateProjectSettings = async (deployNow: boolean = false) => {
+    try {
+      if (deployNow) {
+        setDeployingToServer(true);
+      } else {
+        setSavingProjectSettings(true);
+      }
+      setProjectUpdateSuccessMsg('');
+
+      const updatePayload: any = {
+        name: projectName.trim() || undefined,
+        description: projectDescription.trim() || undefined,
+        framework: projectFramework,
+        domain: projectDomain.trim() || undefined,
+        port_mappings: portMappingsInput.trim() || undefined,
+        db_type: selectedDbType,
+        db_name: customDbName.trim() || undefined,
+        repository_url: project?.source_type === 'git' ? (projectRepoUrl.trim() || undefined) : undefined,
+        branch: project?.source_type === 'git' ? (projectBranch.trim() || undefined) : undefined,
+        dockerfile_path: projectDockerfilePath.trim() || undefined,
+        redeploy: deployNow,
+      };
+
+      const updatedProject = await api.updateProject(projectId, updatePayload);
+
+      if (deployNow) {
+        let depId = updatedProject.deployment_id;
+        if (!depId) {
+          const dep = await api.redeployProject(projectId);
+          depId = dep.id;
+        }
+        router.push(`/deployments/${depId}`);
+      } else {
+        setProjectUpdateSuccessMsg('✓ Pengaturan project berhasil diperbarui dan disinkronkan ke server.');
+        setTimeout(() => setProjectUpdateSuccessMsg(''), 5000);
+        await loadData();
+      }
+    } catch (err: any) {
+      alert(err.message || 'Gagal memperbarui pengaturan project ke server');
+    } finally {
+      setSavingProjectSettings(false);
+      setDeployingToServer(false);
     }
   };
 
@@ -425,19 +490,21 @@ export default function ProjectDetailPage() {
 
           <button
             onClick={() => setDeployModalOpen(true)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-md shadow-blue-600/20 transition-all"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20 text-blue-500 text-xs font-semibold shadow-sm transition-all"
+            title="Ubah konfigurasi, port, database, atau source code lalu deploy ke server"
           >
-            <Rocket className="w-4 h-4" />
-            <span>Deploy Release</span>
+            <FileCode className="w-4 h-4" />
+            <span>Edit &amp; Deploy Ulang</span>
           </button>
 
           <button
             onClick={handleTriggerDeploy}
             disabled={deploying}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-border hover:bg-card text-foreground text-xs font-medium transition-all disabled:opacity-50"
-            title="Deploy commit terbaru"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-md shadow-blue-600/20 transition-all disabled:opacity-50"
+            title="Deploy commit/arsip terbaru langsung ke server"
           >
-            <span>{deploying ? 'Deploying...' : 'Deploy Latest'}</span>
+            <RefreshCw className={`w-3.5 h-3.5 ${deploying ? 'animate-spin' : ''}`} />
+            <span>{deploying ? 'Deploying...' : 'Deploy Ulang'}</span>
           </button>
         </div>
       </div>
@@ -624,11 +691,39 @@ export default function ProjectDetailPage() {
       {activeTab === 'deployments' && (
         <div className="space-y-4">
           <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="p-4 border-b border-border flex items-center justify-between">
-              <h3 className="font-bold text-sm text-foreground">Release History</h3>
-              <button onClick={loadData} className="text-xs text-blue-500 hover:underline flex items-center gap-1">
-                <RefreshCw className="w-3 h-3" /> Refresh
-              </button>
+            <div className="p-4 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="font-bold text-sm text-foreground">Release History</h3>
+                <p className="text-xs text-gray-500">
+                  Daftar riwayat deployment &amp; build container Docker untuk project ini.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setDeployModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20 text-blue-500 text-xs font-semibold transition-all"
+                  title="Sesuaikan konfigurasi project lalu deploy ulang"
+                >
+                  <FileCode className="w-3.5 h-3.5" />
+                  <span>Edit &amp; Deploy Ulang</span>
+                </button>
+                <button
+                  onClick={handleTriggerDeploy}
+                  disabled={deploying}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all shadow-sm shadow-blue-600/20 disabled:opacity-50"
+                  title="Deploy ulang rilis terbaru ke server"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${deploying ? 'animate-spin' : ''}`} />
+                  <span>{deploying ? 'Deploying...' : 'Deploy Ulang'}</span>
+                </button>
+                <button
+                  onClick={loadData}
+                  className="px-2.5 py-1.5 rounded-lg border border-border text-xs text-gray-400 hover:text-foreground flex items-center gap-1 transition-colors"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>Refresh</span>
+                </button>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
@@ -645,7 +740,7 @@ export default function ProjectDetailPage() {
                   {deployments.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="p-8 text-center text-gray-500">
-                        No deployments yet. Click &quot;Deploy Latest&quot; or &quot;Deploy ZIP&quot; to build release v1.
+                        Belum ada riwayat deployment. Klik &quot;Deploy Ulang&quot; atau &quot;Edit &amp; Deploy Ulang&quot; untuk meluncurkan rilis container.
                       </td>
                     </tr>
                   ) : (
@@ -678,8 +773,16 @@ export default function ProjectDetailPage() {
                             href={`/deployments/${d.id}`}
                             className="px-2.5 py-1 rounded border border-border hover:bg-gray-100 dark:hover:bg-gray-800 text-blue-500 font-medium"
                           >
-                            Logs
+                            Live Logs
                           </Link>
+                          <button
+                            onClick={handleTriggerDeploy}
+                            disabled={deploying}
+                            className="px-2.5 py-1 rounded border border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20 text-blue-500 font-semibold disabled:opacity-50"
+                            title="Deploy ulang rilis project ke server"
+                          >
+                            Deploy Ulang
+                          </button>
                           {d.status === 'success' && (
                             <button
                               onClick={() => handleRollback(d.id)}
@@ -1249,15 +1352,188 @@ export default function ProjectDetailPage() {
       {/* Tab: Settings */}
       {activeTab === 'settings' && (
         <div className="space-y-6">
-          {/* Database Engine & Configuration Form */}
+          {projectUpdateSuccessMsg && (
+            <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+              <span>{projectUpdateSuccessMsg}</span>
+            </div>
+          )}
+
+          {/* Card 1: Identitas Project & Local Domain */}
+          <div className="rounded-xl border border-border bg-card p-5 space-y-4 text-xs">
+            <div>
+              <h3 className="font-bold text-sm text-foreground flex items-center gap-2">
+                <Settings className="w-4 h-4 text-blue-500" />
+                <span>Identitas Project & Domain Ingress</span>
+              </h3>
+              <p className="text-gray-500 mt-0.5">
+                Konfigurasi nama, deskripsi, framework aplikasi, dan routing domain lokal virtual host.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-gray-400 font-medium mb-1">Nama Project:</label>
+                <input
+                  type="text"
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                  placeholder="Nama Project"
+                  className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-gray-400 font-medium mb-1">Framework Preset:</label>
+                <select
+                  value={projectFramework}
+                  onChange={(e) => setProjectFramework(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="Next.js">Next.js (React / SSR / App Router)</option>
+                  <option value="Vite / React">Vite / React SPA</option>
+                  <option value="Vue.js">Vue.js / Nuxt</option>
+                  <option value="Node.js">Node.js (Express / Fastify / Nest)</option>
+                  <option value="FastAPI">Python / FastAPI</option>
+                  <option value="Django">Python / Django</option>
+                  <option value="Flask">Python / Flask</option>
+                  <option value="Laravel">Laravel / PHP (Nginx + PHP-FPM)</option>
+                  <option value="Go">Go (Golang Alpine)</option>
+                  <option value="Static HTML">Static HTML / Web</option>
+                  <option value="Dockerfile">Custom / Multi-stage Dockerfile</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-gray-400 font-medium mb-1">Deskripsi:</label>
+                <input
+                  type="text"
+                  value={projectDescription}
+                  onChange={(e) => setProjectDescription(e.target.value)}
+                  placeholder="Deskripsi singkat project"
+                  className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-gray-400 font-medium mb-1">
+                  Local Domain Virtual Host (Ingress Port 80):
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={projectDomain}
+                    onChange={(e) => setProjectDomain(e.target.value)}
+                    placeholder="app.homelab"
+                    className="flex-1 px-3 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  {projectDomain && (
+                    <a
+                      href={`http://${projectDomain}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3 py-2 rounded-lg border border-border hover:bg-card text-gray-400 hover:text-foreground flex items-center gap-1"
+                      title="Buka Domain"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  )}
+                </div>
+                <p className="text-[10px] text-gray-400 mt-1">
+                  Otomatis terdaftar di Nginx Ingress Router &amp; CoreDNS (:53) homelab server.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Card 2: Sumber Kode & Git Configuration */}
+          <div className="rounded-xl border border-border bg-card p-5 space-y-4 text-xs">
+            <div>
+              <h3 className="font-bold text-sm text-foreground flex items-center gap-2">
+                <FolderGit2 className="w-4 h-4 text-purple-500" />
+                <span>Sumber Kode &amp; Build Target</span>
+              </h3>
+              <p className="text-gray-500 mt-0.5">
+                Konfigurasi repositori Git atau upload arsip kode untuk deployment ke server.
+              </p>
+            </div>
+
+            {project?.source_type === 'git' ? (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="sm:col-span-2">
+                  <label className="block text-gray-400 font-medium mb-1">Git Repository URL:</label>
+                  <input
+                    type="text"
+                    value={projectRepoUrl}
+                    onChange={(e) => setProjectRepoUrl(e.target.value)}
+                    placeholder="https://github.com/user/repository.git"
+                    className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-xs focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-gray-400 font-medium mb-1">Target Branch:</label>
+                  <input
+                    type="text"
+                    value={projectBranch}
+                    onChange={(e) => setProjectBranch(e.target.value)}
+                    placeholder="main"
+                    className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-xs focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+
+                <div className="sm:col-span-3">
+                  <label className="block text-gray-400 font-medium mb-1">Dockerfile Path:</label>
+                  <input
+                    type="text"
+                    value={projectDockerfilePath}
+                    onChange={(e) => setProjectDockerfilePath(e.target.value)}
+                    placeholder="Dockerfile"
+                    className="w-full sm:w-1/2 px-3 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-xs focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="p-4 rounded-lg bg-background border border-border space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <span className="font-semibold text-foreground block">Tipe Sumber: ZIP Archive Upload</span>
+                    <span className="text-[11px] text-gray-500">
+                      Project ini dideploy dari file arsip ZIP. Anda dapat mengunggah arsip kode baru kapan saja untuk memperbarui container di server.
+                    </span>
+                  </div>
+                  <div>
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={handleZipUpload}
+                      accept=".zip"
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={deploying}
+                      className="px-3.5 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-medium flex items-center gap-1.5 transition-colors"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>{deploying ? 'Mengunggah...' : 'Upload File ZIP Baru'}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Card 3: Database Engine & Auto-Wire */}
           <div className="rounded-xl border border-border bg-card p-5 space-y-4 text-xs">
             <div>
               <h3 className="font-bold text-sm text-foreground flex items-center gap-2">
                 <Database className="w-4 h-4 text-emerald-500" />
-                <span>Konfigurasi Engine & Nama Database</span>
+                <span>Konfigurasi Engine &amp; Nama Database</span>
               </h3>
               <p className="text-gray-500 mt-0.5">
-                Ubah jenis database (MySQL, PostgreSQL, SQLite, atau Stateless) dan nama database yang dihubungkan ke container aplikasi.
+                Ubah jenis database (PostgreSQL, MySQL, SQLite, atau Stateless) dan nama database yang dihubungkan ke container aplikasi.
               </p>
             </div>
 
@@ -1269,8 +1545,8 @@ export default function ProjectDetailPage() {
                   onChange={(e) => setSelectedDbType(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 >
+                  <option value="postgres">PostgreSQL (:5432) — Direkomendasikan untuk Next.js, Node, Django, FastAPI</option>
                   <option value="mysql">MySQL (:3306) — Cocok untuk Laravel, PHP, WordPress</option>
-                  <option value="postgres">PostgreSQL (:5432) — Cocok untuk Django, Node, Next.js, FastAPI</option>
                   <option value="sqlite">SQLite (File /data/*.db) — Embedded file database</option>
                   <option value="none">Stateless / No Database</option>
                 </select>
@@ -1287,22 +1563,12 @@ export default function ProjectDetailPage() {
               </div>
             </div>
 
-            <div className="flex items-center justify-between pt-1">
-              <span className="text-[11px] text-gray-400">
-                Saat disimpan, variabel koneksi (<code>DATABASE_URL</code>, <code>DB_CONNECTION</code>, <code>DB_HOST</code>, dll.) otomatis diperbarui.
-              </span>
-              <button
-                type="button"
-                onClick={() => handleProvisionDatabase()}
-                disabled={provisioningDb}
-                className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium disabled:opacity-50 transition-colors flex items-center gap-1.5 whitespace-nowrap shadow-sm"
-              >
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>{provisioningDb ? 'Menyimpan...' : 'Simpan & Sinkronkan Database'}</span>
-              </button>
+            <div className="p-3 rounded-lg bg-background border border-border text-[11px] text-gray-400">
+              Kredensial database (<code>DATABASE_URL</code>, <code>DB_CONNECTION</code>, <code>DB_HOST</code>, <code>DB_PORT</code>, dll.) otomatis di-injeksi ke container saat deployment. Engine database pilihan Anda diprioritaskan mutlak dan sisa variabel lama otomatis dibersihkan.
             </div>
           </div>
-          {/* Port Mappings Form */}
+
+          {/* Card 4: Port Mappings */}
           <div className="rounded-xl border border-border bg-card p-5 space-y-4 text-xs">
             <div>
               <h3 className="font-bold text-sm text-foreground flex items-center gap-2">
@@ -1310,35 +1576,24 @@ export default function ProjectDetailPage() {
                 <span>Konfigurasi Port Mapping Docker</span>
               </h3>
               <p className="text-gray-500 mt-0.5">
-                Ubah port host dan port internal container yang diekspos oleh Docker saat deployment berikutnya.
+                Ubah port host dan port internal container yang diekspos oleh Docker saat deployment ke server.
               </p>
             </div>
 
-            <form onSubmit={handleSavePortMappings} className="space-y-3">
-              <div>
-                <label className="block text-gray-400 font-medium mb-1">
-                  Port Mapping (Format: <code>HOST_PORT:CONTAINER_PORT</code>):
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={portMappingsInput}
-                    onChange={(e) => setPortMappingsInput(e.target.value)}
-                    placeholder="3000:3000"
-                    className="flex-1 px-3 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <button
-                    type="submit"
-                    disabled={savingPorts}
-                    className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium disabled:opacity-50 transition-colors"
-                  >
-                    {savingPorts ? 'Menyimpan...' : 'Simpan Port'}
-                  </button>
-                </div>
-              </div>
+            <div>
+              <label className="block text-gray-400 font-medium mb-1">
+                Port Mapping (Format: <code>HOST_PORT:CONTAINER_PORT</code>):
+              </label>
+              <input
+                type="text"
+                value={portMappingsInput}
+                onChange={(e) => setPortMappingsInput(e.target.value)}
+                placeholder="3000:3000"
+                className="w-full sm:w-1/2 px-3 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
 
               {/* Quick Preset Buttons */}
-              <div className="flex flex-wrap gap-2 pt-1 text-[11px]">
+              <div className="flex flex-wrap gap-2 pt-2 text-[11px]">
                 <span className="text-gray-500 self-center">Preset:</span>
                 {[
                   '3000:3000',
@@ -1357,22 +1612,57 @@ export default function ProjectDetailPage() {
                   </button>
                 ))}
               </div>
-            </form>
+            </div>
+          </div>
+
+          {/* Card 5: Action Toolbar (Simpan & Terapkan ke Server) */}
+          <div className="rounded-xl border border-border bg-card p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div>
+              <div className="font-bold text-sm text-foreground">Terapkan Perubahan ke Server</div>
+              <div className="text-xs text-gray-500">
+                Simpan konfigurasi dan luncurkan release baru ke container Docker di server homelab.
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={() => handleUpdateProjectSettings(false)}
+                disabled={savingProjectSettings || deployingToServer}
+                className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl border border-border hover:bg-card text-foreground text-xs font-semibold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+              >
+                <Save className="w-4 h-4 text-gray-400" />
+                <span>{savingProjectSettings ? 'Menyimpan...' : 'Simpan Perubahan'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleUpdateProjectSettings(true)}
+                disabled={savingProjectSettings || deployingToServer}
+                className="flex-1 sm:flex-none px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-blue-600/25 transition-all disabled:opacity-50"
+              >
+                <Rocket className="w-4 h-4" />
+                <span>{deployingToServer ? 'Menerapkan ke Server...' : 'Simpan & Terapkan ke Server'}</span>
+              </button>
+            </div>
           </div>
 
           {/* Danger Zone */}
-          <div className="rounded-xl border border-border bg-card p-5 space-y-4 text-xs">
-            <h3 className="font-bold text-sm text-foreground">Project Danger Zone</h3>
-            <p className="text-gray-500">Removing this project will stop all associated releases.</p>
+          <div className="rounded-xl border border-rose-500/20 bg-card p-5 space-y-4 text-xs">
+            <h3 className="font-bold text-sm text-rose-500 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4" />
+              <span>Project Danger Zone</span>
+            </h3>
+            <p className="text-gray-500">Menghapus project ini akan mematikan container dan menghapus seluruh rilis terkait.</p>
             <button
               onClick={() => {
-                if (confirm('Delete this project?')) {
+                if (confirm('Yakin ingin menghapus project ini secara permanen?')) {
                   api.deleteProject(projectId).then(() => router.push('/projects'));
                 }
               }}
-              className="px-4 py-2 rounded-lg bg-rose-600/10 hover:bg-rose-600/20 text-rose-600 font-medium"
+              className="px-4 py-2 rounded-lg bg-rose-600/10 hover:bg-rose-600/20 text-rose-600 font-medium transition-colors"
             >
-              Delete Project Permanently
+              Hapus Project Permanen
             </button>
           </div>
         </div>
@@ -1384,7 +1674,14 @@ export default function ProjectDetailPage() {
         onClose={() => setDeployModalOpen(false)}
         servers={servers}
         existingProject={project}
-        onSuccess={() => loadData()}
+        onSuccess={(result) => {
+          setDeployModalOpen(false);
+          if (result && result.id) {
+            router.push(`/deployments/${result.id}`);
+          } else {
+            loadData();
+          }
+        }}
       />
     </div>
   );

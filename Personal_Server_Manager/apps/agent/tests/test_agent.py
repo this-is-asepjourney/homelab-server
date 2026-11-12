@@ -107,4 +107,40 @@ def test_postgres_auto_connect_and_dockerfile_injection(tmp_path):
     assert "libpq-dev" in updated_df
 
 
+def test_ensure_project_db_explicit_postgres_priority(tmp_path):
+    # Simulate a workspace with .env.example defaulting to MySQL (e.g. Laravel or generic template)
+    env_example = tmp_path / ".env.example"
+    env_example.write_text(
+        "APP_NAME=Laravel\n"
+        "DB_CONNECTION=mysql\n"
+        "DB_HOST=127.0.0.1\n"
+        "DB_PORT=3306\n"
+        "DB_DATABASE=laravel\n"
+        "DB_USERNAME=root\n"
+        "DB_PASSWORD=\n"
+        "MYSQL_DATABASE=laravel\n"
+    )
+
+    logs = []
+    # User explicitly chose PostgreSQL in the deployment configuration
+    merged_env = DeploymentEngine.ensure_project_db(
+        project_name="my-cool-app",
+        env_vars={"MYSQL_HOST": "localhost", "DB_CONNECTION": "mysql"},
+        db_config={"db_type": "postgres", "db_name": "my_cool_app_db", "user": "postgres", "password": "securepassword"},
+        workspace_dir=str(tmp_path),
+        log_callback=lambda lvl, msg: logs.append(msg),
+    )
+
+    # 1. PostgreSQL variables must be enforced
+    assert merged_env["DB_CONNECTION"] == "pgsql"
+    assert merged_env["DB_PORT"] == "5432"
+    assert merged_env["POSTGRES_DB"] == "my_cool_app_db"
+    assert "postgresql://" in merged_env["DATABASE_URL"]
+
+    # 2. Conflicting MySQL variables must be purged
+    assert "MYSQL_HOST" not in merged_env
+    assert "MYSQL_DATABASE" not in merged_env
+
+
+
 

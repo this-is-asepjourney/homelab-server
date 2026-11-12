@@ -170,18 +170,29 @@ class DeploymentEngine:
                     pass
 
         # Determine target db_type
-        explicit_db_type = cfg.get("db_type")
-        if not explicit_db_type or explicit_db_type in ("postgres", "default", "auto", ""):
+        # If user explicitly configured db_type (e.g. postgres, mysql, sqlite, none) via UI/API,
+        # that choice MUST be respected with absolute priority and NEVER overridden by framework templates or .env.example.
+        explicit_db_type = (cfg.get("db_type") or "").strip().lower()
+        if explicit_db_type in ("postgres", "postgresql", "pgsql"):
+            db_type = "postgres"
+        elif explicit_db_type in ("mysql", "mariadb"):
+            db_type = "mysql"
+        elif explicit_db_type == "sqlite":
+            db_type = "sqlite"
+        elif explicit_db_type in ("none", "stateless", "false"):
+            db_type = "none"
+        else:
+            # Fallback ONLY when explicit_db_type was not set or empty
             if "DB_CONNECTION" in merged_env and merged_env["DB_CONNECTION"]:
-                db_type = merged_env["DB_CONNECTION"].lower().strip()
+                db_conn = merged_env["DB_CONNECTION"].lower().strip()
+                db_type = "postgres" if db_conn in ("pgsql", "postgres", "postgresql") else ("mysql" if db_conn in ("mysql", "mariadb") else db_conn)
             elif "DB_CONNECTION" in env_example_hint and env_example_hint["DB_CONNECTION"]:
-                db_type = env_example_hint["DB_CONNECTION"].lower().strip()
-            elif "MYSQL_DATABASE" in env_example_hint or "MYSQL_HOST" in cfg:
+                db_conn = env_example_hint["DB_CONNECTION"].lower().strip()
+                db_type = "postgres" if db_conn in ("pgsql", "postgres", "postgresql") else ("mysql" if db_conn in ("mysql", "mariadb") else db_conn)
+            elif "MYSQL_DATABASE" in env_example_hint and "POSTGRES_DB" not in env_example_hint:
                 db_type = "mysql"
             else:
-                db_type = explicit_db_type or "postgres"
-        else:
-            db_type = explicit_db_type.lower().strip()
+                db_type = "postgres"
 
         # 1. Stateless / None
         if db_type in ("none", "stateless", "false"):
@@ -480,11 +491,12 @@ class DeploymentEngine:
             "DB_PASSWORD": pg_pass,
         }
 
+        # Purge any conflicting MySQL variables when database is configured as PostgreSQL
+        for my_k in ["MYSQL_URL", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_HOST", "MYSQL_PORT"]:
+            merged_env.pop(my_k, None)
+
         for k, v in pg_vars.items():
-            if k == "DB_CONNECTION":
-                merged_env[k] = "pgsql"
-            elif k not in merged_env or not merged_env.get(k):
-                merged_env[k] = v
+            merged_env[k] = v
 
         return merged_env
 
@@ -998,7 +1010,8 @@ class DeploymentEngine:
         image_tag: str,
         container_name: str,
         log_callback: Callable[[str, str], None],
-        port_mappings: Optional[str] = None
+        port_mappings: Optional[str] = None,
+        db_type: str = "auto",
     ) -> bool:
         """Build image using Dockerfile and launch container directly.
         Automatically attaches container to the homelab network (psm-network)
@@ -1009,8 +1022,18 @@ class DeploymentEngine:
             log_callback("error", f"[Docker] Dockerfile not found at {full_df_path}")
             return False
 
+        # Resolve db_type for Dockerfile PHP/framework driver injection
+        resolved_db_type = db_type
+        if resolved_db_type == "auto":
+            env_map = DeploymentEngine._load_env_dict(workspace_dir)
+            db_conn = env_map.get("DB_CONNECTION", "").lower()
+            if db_conn in ("pgsql", "postgres", "postgresql") or "postgres" in env_map.get("DATABASE_URL", "").lower():
+                resolved_db_type = "postgres"
+            elif db_conn in ("mysql", "mariadb") or "mysql" in env_map.get("DATABASE_URL", "").lower():
+                resolved_db_type = "mysql"
+
         # Ensure required database drivers and normalize script line endings
-        DeploymentEngine.prepare_dockerfile_environment(workspace_dir, dockerfile_path, log_callback)
+        DeploymentEngine.prepare_dockerfile_environment(workspace_dir, dockerfile_path, log_callback, db_type=resolved_db_type)
 
         sanitized_tag = re.sub(r"[^a-z0-9_.:-]", "-", image_tag.lower())
         sanitized_name = re.sub(r"[^a-zA-Z0-9_.-]", "-", container_name.lower())

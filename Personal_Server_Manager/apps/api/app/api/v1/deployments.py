@@ -78,9 +78,12 @@ async def create_git_deployment(
     if not src or not src.repository_url:
         raise HTTPException(status_code=400, detail="Project does not have a Git repository configured")
 
-    # Update port_mappings and env vars if provided in deploy payload
+    # Update port_mappings, db_type, and env vars if provided in deploy payload
     if payload.port_mappings:
         project.port_mappings = payload.port_mappings.strip()
+
+    if payload.db_type:
+        project.db_type = payload.db_type.strip().lower()
 
     if payload.environment_variables:
         for item in payload.environment_variables:
@@ -126,8 +129,8 @@ async def create_git_deployment(
     db.add(initial_log)
     db.commit()
 
-    # Auto-provision & auto-connect PostgreSQL database for the project
-    db_info, env_vars = provision_and_sync_project_db(db, project)
+    # Auto-provision & auto-connect database for the project (respecting explicit db_type and overriding conflicting env)
+    db_info, env_vars = provision_and_sync_project_db(db, project, db_type=project.db_type, override_existing_env=True)
 
     db_type_label = (project.db_type or db_info.get("db_type") or "Database").upper()
     db_log_msg = (
@@ -159,6 +162,7 @@ async def create_git_deployment(
         "port_mappings": project.port_mappings or "3000:3000",
         "image_tag": image_tag,
         "version": version,
+        "db_type": project.db_type,
         "environment_variables": env_vars,
         "database_config": db_info,
     }
@@ -223,6 +227,7 @@ async def finalize_zip_upload(
     file: UploadFile = File(...),
     port_mappings: Optional[str] = Form(None),
     env_vars_json: Optional[str] = Form(None),
+    db_type: Optional[str] = Form(None),
     current_user: User = Depends(require_role("owner", "admin", "operator")),
     db: Session = Depends(get_db)
 ):
@@ -233,9 +238,12 @@ async def finalize_zip_upload(
     if not file.filename.endswith(".zip"):
         raise HTTPException(status_code=400, detail="Only .zip files are supported")
 
-    # Update port mappings if provided with upload
+    # Update port mappings and db_type if provided with upload
     if port_mappings:
         project.port_mappings = port_mappings.strip()
+
+    if db_type:
+        project.db_type = db_type.strip().lower()
 
     # Update environment variables if provided
     if env_vars_json:
@@ -290,6 +298,14 @@ async def finalize_zip_upload(
             os.remove(target_path)
         raise HTTPException(status_code=400, detail="Corrupted or invalid ZIP file")
 
+    # Record saved zip path in project source for future redeployments
+    if not project.source:
+        project_src = ProjectSource(project_id=project.id, upload_object_key=target_path)
+        db.add(project_src)
+    else:
+        project.source.upload_object_key = target_path
+    db.commit()
+
     version = get_next_version(db, project.id)
     image_tag = f"{project.name.lower().replace(' ', '-')}:v{version}"
     now = datetime.now(timezone.utc)
@@ -315,8 +331,8 @@ async def finalize_zip_upload(
     db.add(initial_log)
     db.commit()
 
-    # Auto-provision & auto-connect PostgreSQL database for ZIP deployment
-    db_info, env_vars = provision_and_sync_project_db(db, project)
+    # Auto-provision & auto-connect database for ZIP deployment (respecting explicit db_type and overriding conflicting env)
+    db_info, env_vars = provision_and_sync_project_db(db, project, db_type=project.db_type, override_existing_env=True)
 
     job_payload = {
         "deployment_id": deployment.id,
@@ -329,6 +345,7 @@ async def finalize_zip_upload(
         "dockerfile_path": project.source.dockerfile_path if project.source else "Dockerfile",
         "compose_path": project.source.compose_path if project.source else "docker-compose.yml",
         "port_mappings": project.port_mappings or "3000:3000",
+        "db_type": project.db_type,
         "environment_variables": env_vars,
         "database_config": db_info,
     }
@@ -442,6 +459,7 @@ async def github_webhook_trigger(
         "port_mappings": project.port_mappings or "3000:3000",
         "image_tag": image_tag,
         "version": version,
+        "db_type": project.db_type,
         "environment_variables": env_vars,
         "database_config": db_info,
     }

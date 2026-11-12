@@ -245,6 +245,7 @@ class ProjectUpdate(BaseModel):
     domain: Optional[str] = None
     db_type: Optional[str] = None
     db_name: Optional[str] = None
+    redeploy: Optional[bool] = False
 
 class ProjectResponse(BaseModel):
     id: str
@@ -276,6 +277,7 @@ class DeploymentCreateGit(BaseModel):
     commit_hash: Optional[str] = None
     port_mappings: Optional[str] = None
     domain: Optional[str] = None
+    db_type: Optional[str] = None
     environment_variables: Optional[List[EnvironmentVariableItem]] = None
 
 class DeploymentCreateCompose(BaseModel):

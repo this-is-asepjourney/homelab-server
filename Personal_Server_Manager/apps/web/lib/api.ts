@@ -292,6 +292,17 @@ export const api = {
     return res.json();
   },
 
+  async redeployProject(id: string) {
+    const res = await fetchWithAuth(`/api/v1/projects/${id}/redeploy`, {
+      method: 'POST',
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to redeploy project to server');
+    }
+    return res.json();
+  },
+
   async deleteProject(id: string) {
     const res = await fetchWithAuth(`/api/v1/projects/${id}`, { method: 'DELETE' });
     return res.json();
@@ -401,7 +412,8 @@ export const api = {
     projectId: string,
     branch = 'main',
     portMappings?: string,
-    envVars?: Array<{ key: string; value: string }>
+    envVars?: Array<{ key: string; value: string }>,
+    dbType?: string
   ) {
     const res = await fetchWithAuth('/api/v1/deployments/git', {
       method: 'POST',
@@ -410,6 +422,7 @@ export const api = {
         branch,
         port_mappings: portMappings || undefined,
         environment_variables: envVars || undefined,
+        db_type: dbType || undefined,
       }),
     });
     if (!res.ok) {
@@ -423,7 +436,8 @@ export const api = {
     projectId: string,
     file: File,
     portMappings?: string,
-    envVars?: Array<{ key: string; value: string }>
+    envVars?: Array<{ key: string; value: string }>,
+    dbType?: string
   ) {
     const formData = new FormData();
     formData.append('file', file);
@@ -432,6 +446,9 @@ export const api = {
     }
     if (envVars && envVars.length > 0) {
       formData.append('env_vars_json', JSON.stringify(envVars));
+    }
+    if (dbType) {
+      formData.append('db_type', dbType);
     }
     const res = await fetchWithAuth(`/api/v1/deployments/${projectId}/finalize-upload`, {
       method: 'POST',

@@ -527,15 +527,33 @@ def provision_and_sync_project_db(
         db_info = ensure_postgres_database(target_db_name)
         generated_env = build_postgres_env_vars(db_info)
 
-    # Merge into existing environment
-    for k, v in generated_env.items():
-        if override_existing_env or (k not in existing_env) or not existing_env.get(k):
+    # Merge and enforce active database engine isolation
+    if target_type == "postgres":
+        # Clean conflicting MySQL variables
+        for my_k in ["MYSQL_URL", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_HOST", "MYSQL_PORT"]:
+            existing_env.pop(my_k, None)
+        for k, v in generated_env.items():
             existing_env[k] = v
+    elif target_type in ("mysql", "mariadb"):
+        # Clean conflicting PostgreSQL variables
+        for pg_k in ["POSTGRES_URL", "POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD"]:
+            existing_env.pop(pg_k, None)
+        for k, v in generated_env.items():
+            existing_env[k] = v
+    else:
+        for k, v in generated_env.items():
+            if override_existing_env or (k not in existing_env) or not existing_env.get(k):
+                existing_env[k] = v
 
     # Persist in database
     existing_records = {
         v.key: v for v in db.query(EnvironmentVariable).filter(EnvironmentVariable.project_id == project.id).all()
     }
+    # Remove purged conflicting keys from DB records
+    for k, record in list(existing_records.items()):
+        if k not in existing_env:
+            db.delete(record)
+
     for k, val in existing_env.items():
         enc = encrypt_secret(str(val))
         if k in existing_records:
