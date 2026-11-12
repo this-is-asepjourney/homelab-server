@@ -1,13 +1,13 @@
 {
   "uid": "eternal-iot-main",
-  "title": "Eternal IoT — ESP32 Smart Lock NFC & Sensor (Homelab)",
+  "title": "Eternal IoT — ESP32 Smart Lock NFC & Sensor (PostgreSQL)",
   "tags": [
     "eternal",
     "iot",
     "esp32",
     "nfc",
-    "influxdb",
-    "mysql"
+    "postgresql",
+    "mqtt"
   ],
   "timezone": "browser",
   "schemaVersion": 39,
@@ -69,14 +69,14 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "### 🔐 Eternal — ESP32 Smart Lock NFC &amp; Sensor DHT11\n**Perangkat:** `ETL-ESP32-001` · FW `3.1.0` · IP `192.168.25.104` &nbsp;|&nbsp; **Mode kunci:** Tap NFC 1× = BUKA (ON) · Tap lagi = KUNCI (OFF) · Auto-Lock **2 jam** &nbsp;|&nbsp; **Alur data:** ESP32 → Mosquitto MQTT → PAP Core API `:8000` → InfluxDB `:8086` / MySQL `eternal_db` → Grafana"
+        "content": "## 🛡️ Eternal IoT Pipeline (PostgreSQL Architecture)\n**Flow:** `ESP32 Hardware` ➔ **Mosquitto MQTT (:1883)** ➔ **PAP Core Worker (MqttPgConsumer)** ➔ **PostgreSQL eternal_iot (:5432)** ➔ **Grafana (:3001)**\n\n- **Hardware ESP32:** Hanya terhubung ke MQTT dan REST API PAP Core (`:8000`). Tidak ada koneksi database langsung.\n- **PostgreSQL DB:** Dedicated database `eternal_iot` untuk sinkronisasi kartu NFC, log audit akses, telemetry timeseries, dan state kunci."
       },
       "transparent": true
     },
     {
       "id": 2,
       "type": "row",
-      "title": "🔐 Status Kunci & Konektivitas (realtime — InfluxDB)",
+      "title": "🔐 Status Kunci & Konektivitas (realtime — PostgreSQL)",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -92,17 +92,20 @@
       "title": "🔐 Status Kunci",
       "description": "Status solenoid/relay terakhir dari ESP32 (is_locked: 0 = terbuka, 1 = terkunci).",
       "datasource": {
-        "type": "influxdb",
-        "uid": "influxdb-iot"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-iot"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"is_locked\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_time\", \"_value\"])"
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT CASE WHEN is_locked = 0 THEN 1 ELSE 0 END AS \"Status\" FROM device_locks WHERE device_serial = '$serial' LIMIT 1;",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -177,17 +180,20 @@
       "title": "⏳ Sisa Timer Auto-Lock (maks 2 jam)",
       "description": "Hitung mundur sebelum kunci otomatis terkunci kembali (7200 detik = 2 jam).",
       "datasource": {
-        "type": "influxdb",
-        "uid": "influxdb-iot"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-iot"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"remaining_sec\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_time\", \"_value\"])"
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT CASE WHEN is_locked = 0 AND unlock_expires_at > NOW() THEN EXTRACT(EPOCH FROM (unlock_expires_at - NOW()))::int ELSE 0 END AS \"Sisa Waktu\" FROM device_locks WHERE device_serial = '$serial' LIMIT 1;",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -248,20 +254,20 @@
       "title": "🪪 Tap NFC Terakhir",
       "description": "Pengguna kartu NFC yang terakhir tap (dari tabel nfc_access_logs).",
       "datasource": {
-        "type": "mysql",
-        "uid": "mysql-iot-db"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "mysql",
-            "uid": "mysql-iot-db"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "rawQuery": true,
           "editorMode": "code",
           "format": "table",
-          "rawSql": "SELECT CONCAT(nama, ' (', uid, ')') AS 'Pengguna' FROM nfc_access_logs WHERE action_type IN ('NFC_TAP_ON_UNLOCK','NFC_TAP_OFF_LOCK','NFC_REGISTER_UNLOCK','TAP_ON','TAP_OFF','NFC_DENIED') ORDER BY id DESC LIMIT 1;"
+          "rawQuery": true,
+          "rawSql": "SELECT CONCAT(nama, ' (', uid, ')') AS \"Pengguna\" FROM nfc_access_logs WHERE action_type IN ('NFC_TAP_ON_UNLOCK','NFC_TAP_OFF_LOCK','NFC_REGISTER_UNLOCK','TAP_ON','TAP_OFF','NFC_DENIED') ORDER BY id DESC LIMIT 1;",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -312,17 +318,20 @@
       "title": "📡 Koneksi ESP32",
       "description": "ONLINE bila ada data masuk ke InfluxDB dalam 90 detik terakhir.",
       "datasource": {
-        "type": "influxdb",
-        "uid": "influxdb-iot"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-iot"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"rssi\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> map(fn: (r) => ({r with _value: (int(v: now()) - int(v: r._time)) / 1000000000}))\n  |> keep(columns: [\"_time\", \"_value\"])"
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT CASE WHEN last_seen_at >= NOW() - INTERVAL '60 seconds' THEN 1 ELSE 0 END AS \"Status\" FROM iot_devices WHERE device_serial = '$serial' LIMIT 1;",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -403,17 +412,20 @@
       "title": "📶 Sinyal WiFi",
       "description": "RSSI WiFi ESP32. ≥ -60 sangat kuat · ≥ -70 baik · ≥ -80 sedang · lebih rendah lemah.",
       "datasource": {
-        "type": "influxdb",
-        "uid": "influxdb-iot"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-iot"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"rssi\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_time\", \"_value\"])"
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT wifi_rssi AS \"RSSI\" FROM iot_devices WHERE device_serial = '$serial' LIMIT 1;",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -475,7 +487,7 @@
     {
       "id": 8,
       "type": "row",
-      "title": "🌡️ Sensor DHT11 — Suhu, Kelembapan & Heat Index",
+      "title": "🌡️ Sensor DHT11 — Suhu, Kelembapan & Heat Index (PostgreSQL)",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -491,17 +503,20 @@
       "title": "🌡️ Suhu Udara",
       "description": "Suhu terakhir dari DHT11.",
       "datasource": {
-        "type": "influxdb",
-        "uid": "influxdb-iot"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-iot"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"temperature\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_time\", \"_value\"])"
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT temperature_c AS \"Suhu\" FROM iot_devices WHERE device_serial = '$serial' LIMIT 1;",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -566,17 +581,20 @@
       "title": "💧 Kelembapan",
       "description": "Kelembapan relatif terakhir dari DHT11 (ideal 35–70%).",
       "datasource": {
-        "type": "influxdb",
-        "uid": "influxdb-iot"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-iot"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"humidity\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_time\", \"_value\"])"
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT humidity_pct AS \"Kelembapan\" FROM iot_devices WHERE device_serial = '$serial' LIMIT 1;",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -637,17 +655,20 @@
       "title": "🥵 Heat Index",
       "description": "Indeks panas (suhu yang dirasakan).",
       "datasource": {
-        "type": "influxdb",
-        "uid": "influxdb-iot"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-iot"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"heat_index\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_time\", \"_value\"])"
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT heat_index_c AS \"Heat Index\" FROM iot_devices WHERE device_serial = '$serial' LIMIT 1;",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -712,17 +733,20 @@
       "title": "🏠 Kenyamanan Ruangan",
       "description": "Klasifikasi sama seperti di firmware (getAirQualityStatus).",
       "datasource": {
-        "type": "influxdb",
-        "uid": "influxdb-iot"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-iot"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"temperature\" or r[\"_field\"] == \"humidity\")\n  |> filter(fn: (r) => r[\"_value\"] > 0.0)\n  |> group(columns: [\"_field\"])\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> group()\n  |> keep(columns: [\"_measurement\", \"_field\", \"_value\"])\n  |> pivot(rowKey: [\"_measurement\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> map(fn: (r) => ({_time: now(), _value:\n        if r.temperature < 22.0 then \"Sejuk\"\n        else if r.temperature <= 28.5 and r.humidity >= 35.0 and r.humidity <= 70.0 then \"Nyaman Ideal\"\n        else if r.temperature <= 32.0 then \"Hangat\"\n        else \"Panas\"}))\n  |> keep(columns: [\"_time\", \"_value\"])"
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT CASE WHEN temperature_c < 22.0 THEN 'Sejuk' WHEN temperature_c <= 28.5 AND humidity_pct >= 35.0 AND humidity_pct <= 70.0 THEN 'Nyaman Ideal' WHEN temperature_c <= 32.0 THEN 'Hangat' ELSE 'Panas' END AS \"Kenyamanan\" FROM iot_devices WHERE device_serial = '$serial' LIMIT 1;",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -796,36 +820,23 @@
     {
       "id": 13,
       "type": "timeseries",
-      "title": "📈 Riwayat Suhu, Kelembapan & Heat Index (InfluxDB)",
+      "title": "📈 Riwayat Suhu, Kelembapan & Heat Index (PostgreSQL)",
       "description": "",
       "datasource": {
-        "type": "influxdb",
-        "uid": "influxdb-iot"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-iot"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"temperature\")\n  |> filter(fn: (r) => r[\"_value\"] > 0.0)\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> rename(columns: {_value: \"Suhu (°C)\"})\n  |> keep(columns: [\"_time\", \"Suhu (°C)\"])"
-        },
-        {
-          "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-iot"
-          },
-          "refId": "B",
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"heat_index\")\n  |> filter(fn: (r) => r[\"_value\"] > 0.0)\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> rename(columns: {_value: \"Heat Index (°C)\"})\n  |> keep(columns: [\"_time\", \"Heat Index (°C)\"])"
-        },
-        {
-          "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-iot"
-          },
-          "refId": "C",
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"humidity\")\n  |> filter(fn: (r) => r[\"_value\"] > 0.0)\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> rename(columns: {_value: \"Kelembapan (%)\"})\n  |> keep(columns: [\"_time\", \"Kelembapan (%)\"])"
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT recorded_at AS time, temperature_c AS \"Suhu (°C)\", humidity_pct AS \"Kelembapan (%)\", heat_index_c AS \"Heat Index (°C)\" FROM iot_telemetry_logs WHERE $__timeFilter(recorded_at) AND device_serial = '$serial' ORDER BY recorded_at ASC;",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -939,7 +950,7 @@
     {
       "id": 14,
       "type": "row",
-      "title": "🔓 Riwayat Buka/Kunci & Telemetri Perangkat",
+      "title": "🌡️ Suhu Rata-rata",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -947,24 +958,44 @@
         "x": 0,
         "y": 18
       },
-      "panels": []
-    },
-    {
-      "id": 15,
-      "type": "state-timeline",
-      "title": "🔐 Timeline Status Kunci (Terbuka / Terkunci)",
+      "panels": [],
       "datasource": {
-        "type": "influxdb",
-        "uid": "influxdb-iot"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-iot"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"is_locked\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> rename(columns: {_value: \"Kunci\"})\n  |> keep(columns: [\"_time\", \"Kunci\"])"
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT ROUND(AVG(temperature_c)::numeric, 1) AS \"Suhu Rata-rata\" FROM iot_telemetry_logs WHERE $__timeFilter(recorded_at) AND device_serial = '$serial' AND temperature_c > 0;",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "type": "state-timeline",
+      "title": "💧 Kelembapan Rata-rata",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-iot-db"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "postgres-iot-db"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT ROUND(AVG(humidity_pct)::numeric, 1) AS \"Kelembapan Rata-rata\" FROM iot_telemetry_logs WHERE $__timeFilter(recorded_at) AND device_serial = '$serial' AND humidity_pct > 0;",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -1037,20 +1068,23 @@
     {
       "id": 16,
       "type": "timeseries",
-      "title": "📶 Riwayat Sinyal WiFi (RSSI)",
+      "title": "📈 Suhu Tertinggi",
       "description": "",
       "datasource": {
-        "type": "influxdb",
-        "uid": "influxdb-iot"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-iot"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"rssi\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> rename(columns: {_value: \"RSSI (dBm)\"})\n  |> keep(columns: [\"_time\", \"RSSI (dBm)\"])"
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT MAX(temperature_c) AS \"Suhu Tertinggi\" FROM iot_telemetry_logs WHERE $__timeFilter(recorded_at) AND device_serial = '$serial';",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -1120,20 +1154,23 @@
     {
       "id": 17,
       "type": "timeseries",
-      "title": "🧠 Free Heap ESP32",
+      "title": "📉 Suhu Terendah",
       "description": "Memori bebas terendah per interval. Turun terus-menerus = indikasi memory leak.",
       "datasource": {
-        "type": "influxdb",
-        "uid": "influxdb-iot"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-iot"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"free_heap\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: min, createEmpty: false)\n  |> rename(columns: {_value: \"Free Heap (byte)\"})\n  |> keep(columns: [\"_time\", \"Free Heap (byte)\"])"
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT MIN(temperature_c) AS \"Suhu Terendah\" FROM iot_telemetry_logs WHERE $__timeFilter(recorded_at) AND device_serial = '$serial' AND temperature_c > 0;",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -1201,7 +1238,7 @@
     {
       "id": 18,
       "type": "timeseries",
-      "title": "⏱️ Uptime ESP32",
+      "title": "🪪 Akses NFC & Riwayat Keamanan (PostgreSQL)",
       "description": "Kurva naik terus = stabil. Turun ke 0 = ESP32 restart / reboot.",
       "datasource": {
         "type": "influxdb",
@@ -1282,7 +1319,7 @@
     {
       "id": 19,
       "type": "row",
-      "title": "🪪 Aktivitas Kartu NFC (MySQL eternal_db)",
+      "title": "🔑 Total Tap Berhasil",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -1290,28 +1327,45 @@
         "x": 0,
         "y": 31
       },
-      "panels": []
-    },
-    {
-      "id": 20,
-      "type": "stat",
-      "title": "✅ Akses Berhasil (rentang waktu)",
-      "description": "Jumlah tap yang membuka/mengunci pada rentang waktu dashboard.",
+      "panels": [],
       "datasource": {
-        "type": "mysql",
-        "uid": "mysql-iot-db"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "mysql",
-            "uid": "mysql-iot-db"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "rawQuery": true,
           "editorMode": "code",
           "format": "table",
-          "rawSql": "SELECT COUNT(*) AS 'Akses Berhasil' FROM nfc_access_logs WHERE $__timeFilter(created_at) AND action_type IN ('NFC_TAP_ON_UNLOCK','NFC_TAP_OFF_LOCK','NFC_REGISTER_UNLOCK','TAP_ON','TAP_OFF');"
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*) AS \"Berhasil\" FROM nfc_access_logs WHERE $__timeFilter(created_at) AND action_type IN ('NFC_TAP_ON_UNLOCK','NFC_TAP_OFF_LOCK','NFC_REGISTER_UNLOCK','TAP_ON','TAP_OFF');",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "stat",
+      "title": "🔓 Tap Buka Kunci (ON)",
+      "description": "Jumlah tap yang membuka/mengunci pada rentang waktu dashboard.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-iot-db"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "postgres-iot-db"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*) AS \"Buka (ON)\" FROM nfc_access_logs WHERE $__timeFilter(created_at) AND action_type IN ('NFC_TAP_ON_UNLOCK','NFC_REGISTER_UNLOCK','TAP_ON');",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -1359,23 +1413,23 @@
     {
       "id": 21,
       "type": "stat",
-      "title": "⛔ Akses Ditolak (rentang waktu)",
+      "title": "⛔ Percobaan Ditolak",
       "description": "Kartu tidak terdaftar yang mencoba akses. Banyak penolakan = periksa keamanan.",
       "datasource": {
-        "type": "mysql",
-        "uid": "mysql-iot-db"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "mysql",
-            "uid": "mysql-iot-db"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "rawQuery": true,
           "editorMode": "code",
           "format": "table",
-          "rawSql": "SELECT COUNT(*) AS 'Ditolak' FROM nfc_access_logs WHERE $__timeFilter(created_at) AND action_type = 'NFC_DENIED';"
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*) AS \"Ditolak\" FROM nfc_access_logs WHERE $__timeFilter(created_at) AND action_type = 'NFC_DENIED';",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -1434,20 +1488,20 @@
       "title": "👥 Kartu NFC Aktif",
       "description": "",
       "datasource": {
-        "type": "mysql",
-        "uid": "mysql-iot-db"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "mysql",
-            "uid": "mysql-iot-db"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "rawQuery": true,
           "editorMode": "code",
           "format": "table",
-          "rawSql": "SELECT COUNT(*) AS 'Kartu Aktif' FROM nfc_users WHERE is_active = 1;"
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*) AS \"Kartu Aktif\" FROM nfc_users WHERE is_active = 1;",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -1498,20 +1552,20 @@
       "title": "🕒 Tap Terakhir",
       "description": "Waktu tap kartu terakhir.",
       "datasource": {
-        "type": "mysql",
-        "uid": "mysql-iot-db"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "mysql",
-            "uid": "mysql-iot-db"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "rawQuery": true,
           "editorMode": "code",
           "format": "table",
-          "rawSql": "SELECT MAX(created_at) AS 'Tap Terakhir' FROM nfc_access_logs WHERE action_type IN ('NFC_TAP_ON_UNLOCK','NFC_TAP_OFF_LOCK','NFC_REGISTER_UNLOCK','TAP_ON','TAP_OFF','NFC_DENIED');"
+          "rawQuery": true,
+          "rawSql": "SELECT MAX(created_at) AS \"Tap Terakhir\" FROM nfc_access_logs WHERE action_type IN ('NFC_TAP_ON_UNLOCK','NFC_TAP_OFF_LOCK','NFC_REGISTER_UNLOCK','TAP_ON','TAP_OFF','NFC_DENIED');",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -1562,20 +1616,20 @@
       "title": "📊 Aktivitas Tap per Jam",
       "description": "",
       "datasource": {
-        "type": "mysql",
-        "uid": "mysql-iot-db"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "mysql",
-            "uid": "mysql-iot-db"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "rawQuery": true,
           "editorMode": "code",
           "format": "time_series",
-          "rawSql": "SELECT $__timeGroupAlias(created_at, 1h), SUM(action_type IN ('NFC_TAP_ON_UNLOCK','NFC_TAP_OFF_LOCK','NFC_REGISTER_UNLOCK','TAP_ON','TAP_OFF')) AS 'Berhasil', SUM(action_type = 'NFC_DENIED') AS 'Ditolak' FROM nfc_access_logs WHERE $__timeFilter(created_at) GROUP BY 1 ORDER BY 1;"
+          "rawQuery": true,
+          "rawSql": "SELECT DATE_TRUNC('hour', created_at) AS time, SUM(CASE WHEN action_type IN ('NFC_TAP_ON_UNLOCK','NFC_TAP_OFF_LOCK','NFC_REGISTER_UNLOCK','TAP_ON','TAP_OFF') THEN 1 ELSE 0 END) AS \"Berhasil\", SUM(CASE WHEN action_type = 'NFC_DENIED' THEN 1 ELSE 0 END) AS \"Ditolak\" FROM nfc_access_logs WHERE $__timeFilter(created_at) GROUP BY 1 ORDER BY 1;",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -1659,20 +1713,20 @@
       "type": "piechart",
       "title": "🥧 Tap per Pengguna",
       "datasource": {
-        "type": "mysql",
-        "uid": "mysql-iot-db"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "mysql",
-            "uid": "mysql-iot-db"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "rawQuery": true,
           "editorMode": "code",
           "format": "table",
-          "rawSql": "SELECT nama AS 'Pengguna', COUNT(*) AS 'Tap' FROM nfc_access_logs WHERE $__timeFilter(created_at) AND action_type IN ('NFC_TAP_ON_UNLOCK','NFC_TAP_OFF_LOCK','NFC_REGISTER_UNLOCK','TAP_ON','TAP_OFF') GROUP BY nama ORDER BY 2 DESC;"
+          "rawQuery": true,
+          "rawSql": "SELECT nama AS \"Pengguna\", COUNT(*) AS \"Tap\" FROM nfc_access_logs WHERE $__timeFilter(created_at) AND action_type IN ('NFC_TAP_ON_UNLOCK','NFC_TAP_OFF_LOCK','NFC_REGISTER_UNLOCK','TAP_ON','TAP_OFF') GROUP BY nama ORDER BY 2 DESC;",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -1721,20 +1775,20 @@
       "title": "👥 Daftar Pengguna Kartu NFC",
       "description": "",
       "datasource": {
-        "type": "mysql",
-        "uid": "mysql-iot-db"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "mysql",
-            "uid": "mysql-iot-db"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "rawQuery": true,
           "editorMode": "code",
           "format": "table",
-          "rawSql": "SELECT uid AS 'UID', nama AS 'Nama', username AS 'Username', role AS 'Role', CASE WHEN is_active = 1 THEN '✅ AKTIF' ELSE '⛔ NONAKTIF' END AS 'Status', total_taps AS 'Total Tap', COALESCE(last_login_at, '-') AS 'Tap Terakhir' FROM nfc_users ORDER BY id ASC;"
+          "rawQuery": true,
+          "rawSql": "SELECT uid AS \"UID\", nama AS \"Nama\", username AS \"Username\", role AS \"Role\", CASE WHEN is_active = 1 THEN '✅ AKTIF' ELSE '⛔ NONAKTIF' END AS \"Status\", total_taps AS \"Total Tap\", COALESCE(TO_CHAR(last_login_at, 'YYYY-MM-DD HH24:MI:SS'), '-') AS \"Tap Terakhir\" FROM nfc_users ORDER BY id ASC;",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -1855,20 +1909,20 @@
       "title": "📋 Log Akses NFC (Buka / Kunci / Ditolak)",
       "description": "",
       "datasource": {
-        "type": "mysql",
-        "uid": "mysql-iot-db"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "mysql",
-            "uid": "mysql-iot-db"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "rawQuery": true,
           "editorMode": "code",
           "format": "table",
-          "rawSql": "SELECT created_at AS 'Waktu', uid AS 'UID', nama AS 'Nama', role AS 'Role', CASE action_type\n    WHEN 'NFC_TAP_ON_UNLOCK'    THEN '🔓 Buka Kunci (Tap ON)'\n    WHEN 'TAP_ON'               THEN '🔓 Buka Kunci (Tap ON)'\n    WHEN 'NFC_REGISTER_UNLOCK'  THEN '🔓 Buka Kunci (Daftar Kartu)'\n    WHEN 'NFC_TAP_OFF_LOCK'     THEN '🔒 Kunci (Tap OFF)'\n    WHEN 'TAP_OFF'              THEN '🔒 Kunci (Tap OFF)'\n    WHEN 'AUTO_LOCK_2H'         THEN '⏲️ Auto-Lock 2 Jam'\n    WHEN 'NFC_DENIED'           THEN '⛔ Ditolak (Kartu Tidak Terdaftar)'\n    WHEN 'MQTT_REMOTE_UNLOCK'   THEN '🌐 Remote Buka (MQTT)'\n    WHEN 'MQTT_REMOTE_LOCK'     THEN '🌐 Remote Kunci (MQTT)'\n    WHEN 'MQTT_REMOTE_TOGGLE_ON'  THEN '🌐 Remote Buka (MQTT)'\n    WHEN 'MQTT_REMOTE_TOGGLE_OFF' THEN '🌐 Remote Kunci (MQTT)'\n    ELSE action_type END AS 'Aksi', lock_duration_sec AS 'Durasi (s)', device_ip AS 'IP ESP32' FROM nfc_access_logs WHERE $__timeFilter(created_at) AND action_type <> 'REGISTER_USER' ORDER BY id DESC LIMIT 100;"
+          "rawQuery": true,
+          "rawSql": "SELECT TO_CHAR(created_at, 'YYYY-MM-DD HH24:MI:SS') AS \"Waktu\", uid AS \"UID\", nama AS \"Nama\", role AS \"Role\", CASE action_type WHEN 'NFC_TAP_ON_UNLOCK' THEN '🔓 Buka Kunci (Tap ON)' WHEN 'TAP_ON' THEN '🔓 Buka Kunci (Tap ON)' WHEN 'NFC_REGISTER_UNLOCK' THEN '🔓 Buka Kunci (Daftar Kartu)' WHEN 'NFC_TAP_OFF_LOCK' THEN '🔒 Kunci (Tap OFF)' WHEN 'TAP_OFF' THEN '🔒 Kunci (Tap OFF)' WHEN 'AUTO_LOCK_2H' THEN '⏲️ Auto-Lock 2 Jam' WHEN 'NFC_DENIED' THEN '⛔ Ditolak (Kartu Tidak Terdaftar)' WHEN 'MQTT_REMOTE_UNLOCK' THEN '🌐 Remote Buka (MQTT)' WHEN 'MQTT_REMOTE_LOCK' THEN '🌐 Remote Kunci (MQTT)' WHEN 'MQTT_REMOTE_TOGGLE_ON' THEN '🌐 Remote Buka (MQTT)' WHEN 'MQTT_REMOTE_TOGGLE_OFF' THEN '🌐 Remote Kunci (MQTT)' ELSE action_type END AS \"Aksi\", lock_duration_sec AS \"Durasi (s)\", device_ip AS \"IP ESP32\" FROM nfc_access_logs WHERE $__timeFilter(created_at) AND action_type <> 'REGISTER_USER' ORDER BY id DESC LIMIT 100;",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -1972,7 +2026,7 @@
     {
       "id": 28,
       "type": "row",
-      "title": "📡 Info Perangkat & Kesehatan Pipeline",
+      "title": "📡 Info Perangkat & Kesehatan Pipeline (PostgreSQL)",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -1988,17 +2042,20 @@
       "title": "⏱️ Uptime",
       "description": "Lama ESP32 menyala sejak boot terakhir.",
       "datasource": {
-        "type": "influxdb",
-        "uid": "influxdb-iot"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-iot"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"uptime_sec\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_time\", \"_value\"])"
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT uptime_sec AS \"Uptime\" FROM iot_devices WHERE device_serial = '$serial' LIMIT 1;",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -2050,17 +2107,20 @@
       "title": "🧠 Free Heap",
       "description": "Memori bebas ESP32 saat ini.",
       "datasource": {
-        "type": "influxdb",
-        "uid": "influxdb-iot"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-iot"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"free_heap\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_time\", \"_value\"])"
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT free_heap AS \"Free Heap\" FROM iot_devices WHERE device_serial = '$serial' LIMIT 1;",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -2117,20 +2177,23 @@
     {
       "id": 31,
       "type": "stat",
-      "title": "📥 Data Masuk InfluxDB (1 jam)",
+      "title": "📥 Data Masuk Telemetri (1 jam)",
       "description": "Jumlah titik telemetri yang masuk 1 jam terakhir. 0 = pipeline MQTT → API → InfluxDB terputus.",
       "datasource": {
-        "type": "influxdb",
-        "uid": "influxdb-iot"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-iot"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -1h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"rssi\")\n  |> group()\n  |> count()"
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*) AS \"Paket Data\" FROM iot_telemetry_logs WHERE recorded_at >= NOW() - INTERVAL '1 hour' AND device_serial = '$serial';",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -2182,23 +2245,23 @@
     {
       "id": 32,
       "type": "stat",
-      "title": "🔄 Sinkron MySQL (iot_devices)",
+      "title": "🔄 Status Sinkron PostgreSQL (iot_devices)",
       "description": "Apakah snapshot perangkat di MySQL eternal_db diperbarui dalam 2 menit terakhir.",
       "datasource": {
-        "type": "mysql",
-        "uid": "mysql-iot-db"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "mysql",
-            "uid": "mysql-iot-db"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "rawQuery": true,
           "editorMode": "code",
           "format": "table",
-          "rawSql": "SELECT CASE WHEN updated_at IS NULL THEN 'BELUM ADA DATA' WHEN TIMESTAMPDIFF(SECOND, updated_at, NOW()) <= 120 THEN 'TERSINKRON' ELSE 'TERTINGGAL' END AS 'Sinkron' FROM iot_devices WHERE device_serial = '${serial}' LIMIT 1;"
+          "rawQuery": true,
+          "rawSql": "SELECT CASE WHEN updated_at IS NULL THEN 'BELUM ADA DATA' WHEN EXTRACT(EPOCH FROM (NOW() - updated_at)) <= 120 THEN 'TERSINKRON' ELSE 'TERTINGGAL' END AS \"Status\" FROM iot_devices WHERE device_serial = '$serial' LIMIT 1;",
+          "refId": "A"
         }
       ],
       "gridPos": {
@@ -2270,20 +2333,20 @@
       "title": "🖥️ Info Perangkat Terdaftar (iot_devices)",
       "description": "",
       "datasource": {
-        "type": "mysql",
-        "uid": "mysql-iot-db"
+        "type": "postgres",
+        "uid": "postgres-iot-db"
       },
       "targets": [
         {
           "datasource": {
-            "type": "mysql",
-            "uid": "mysql-iot-db"
+            "type": "postgres",
+            "uid": "postgres-iot-db"
           },
-          "refId": "A",
-          "rawQuery": true,
           "editorMode": "code",
           "format": "table",
-          "rawSql": "SELECT device_serial AS 'Serial', device_name AS 'Nama', model AS 'Model', ip_address AS 'IP', mac_address AS 'MAC', ssid AS 'SSID', firmware_version AS 'Firmware', wifi_rssi AS 'RSSI (dBm)', status AS 'Status', last_seen_at AS 'Terakhir Terlihat' FROM iot_devices ORDER BY device_serial;"
+          "rawQuery": true,
+          "rawSql": "SELECT device_serial AS \"Serial\", device_name AS \"Nama\", model AS \"Model\", ip_address AS \"IP\", mac_address AS \"MAC\", ssid AS \"SSID\", firmware_version AS \"Firmware\", wifi_rssi AS \"RSSI (dBm)\", status AS \"Status\", COALESCE(TO_CHAR(last_seen_at, 'YYYY-MM-DD HH24:MI:SS'), '-') AS \"Terakhir Terlihat\" FROM iot_devices ORDER BY device_serial;",
+          "refId": "A"
         }
       ],
       "gridPos": {

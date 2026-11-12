@@ -102,8 +102,8 @@ class RequestContextAndSecurityMiddleware(BaseHTTPMiddleware):
         # Allow iframe embedding across homelab dashboards (PSM :3005, Grafana :3001, Ingress :80)
         # Using CSP frame-ancestors prevents browser 'ERR_BLOCKED_BY_RESPONSE' while keeping cross-site safe
         response.headers["Content-Security-Policy"] = (
-            "frame-ancestors 'self' http://localhost:* http://127.0.0.1:* "
-            "http://192.168.25.101:* http://100.106.63.90:* http://*.homelab http://*.fa.local *"
+            "frame-ancestors 'self' * http: https: http://localhost:* http://127.0.0.1:* "
+            "http://192.168.25.101:* http://100.106.63.90:* http://*.homelab http://*.fa.local"
         )
 
         logger.info(

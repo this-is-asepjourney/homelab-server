@@ -206,18 +206,18 @@ class PapWorker:
         devices = mqtt_status.get("devices_last_seen", {})
         now = time.time()
 
-        # If no messages seen in session yet, also check MySQL devices
+        # If no messages seen in session yet, also check PostgreSQL devices
         if not devices:
             try:
-                from app.modules.iot.nfc_service import get_eternal_mysql_conn
-                conn = get_eternal_mysql_conn()
+                from app.modules.iot.nfc_service import get_eternal_pg_conn
+                conn = get_eternal_pg_conn()
                 try:
                     with conn.cursor() as cur:
-                        cur.execute("SELECT device_serial, status, UNIX_TIMESTAMP(last_seen_at) FROM iot_devices;")
+                        cur.execute("SELECT device_serial, status, EXTRACT(EPOCH FROM last_seen_at) AS ts FROM iot_devices;")
                         rows = cur.fetchall() or []
                         for r in rows:
-                            s = r.get("device_serial")
-                            ts = r.get("UNIX_TIMESTAMP(last_seen_at)")
+                            s = r.get("device_serial") if isinstance(r, dict) else r[0]
+                            ts = r.get("ts") if isinstance(r, dict) else r[2]
                             if s and ts:
                                 devices[s] = float(ts)
                 finally:
@@ -240,7 +240,7 @@ class PapWorker:
                     status=504,
                     source="worker",
                     target="core",
-                    sub_target="mysql",
+                    sub_target="postgresql",
                     tag="FLEET_OFFLINE",
                     color="#ef4444",
                     detail=f"Watchdog alert: {serial} is silent ({int(idle_sec)}s without telemetry)"
@@ -255,7 +255,7 @@ class PapWorker:
                     status=200,
                     source="worker",
                     target="core",
-                    sub_target="mysql",
+                    sub_target="postgresql",
                     tag="FLEET_ONLINE",
                     color="#10b981",
                     detail=f"Watchdog recovery: {serial} resumed telemetry"
@@ -263,8 +263,8 @@ class PapWorker:
 
     def _update_device_status_in_db(self, serial: str, status: str):
         try:
-            from app.modules.iot.nfc_service import get_eternal_mysql_conn
-            conn = get_eternal_mysql_conn()
+            from app.modules.iot.nfc_service import get_eternal_pg_conn
+            conn = get_eternal_pg_conn()
             try:
                 with conn.cursor() as cur:
                     cur.execute(
@@ -301,13 +301,13 @@ class PapWorker:
             logger.debug(f"[Worker NFC Sync] Note: {e}")
 
     def _run_database_maintenance(self):
-        """Prunes old telemetry logs in MySQL older than 14 days (InfluxDB handles long-term TSDB)."""
+        """Prunes old telemetry logs in PostgreSQL older than 14 days."""
         try:
-            from app.modules.iot.nfc_service import get_eternal_mysql_conn
-            conn = get_eternal_mysql_conn()
+            from app.modules.iot.nfc_service import get_eternal_pg_conn
+            conn = get_eternal_pg_conn()
             try:
                 with conn.cursor() as cur:
-                    cur.execute("DELETE FROM iot_telemetry_logs WHERE recorded_at < NOW() - INTERVAL 14 DAY;")
+                    cur.execute("DELETE FROM iot_telemetry_logs WHERE recorded_at < NOW() - INTERVAL '14 days';")
                     deleted = cur.rowcount
                     if deleted > 0:
                         logger.info(f"[Worker Maintenance] Pruned {deleted} old raw rows from iot_telemetry_logs (>14d)")
@@ -317,16 +317,16 @@ class PapWorker:
             logger.debug(f"[Worker Maintenance] Note: {e}")
 
     def _check_databases_health(self) -> Dict[str, str]:
-        """Runs fast connectivity checks across Postgres, MySQL, and InfluxDB."""
+        """Runs fast connectivity checks across Postgres and PostgreSQL eternal_iot."""
         results = {}
-        # 1. MySQL
+        # 1. PostgreSQL eternal_iot
         try:
-            from app.modules.iot.nfc_service import get_eternal_mysql_conn
-            c = get_eternal_mysql_conn()
+            from app.modules.iot.nfc_service import get_eternal_pg_conn
+            c = get_eternal_pg_conn()
             c.close()
-            results["mysql"] = "healthy"
+            results["eternal_iot_postgres"] = "healthy"
         except Exception as e:
-            results["mysql"] = f"unhealthy: {e}"
+            results["eternal_iot_postgres"] = f"unhealthy: {e}"
 
         # 2. InfluxDB
         try:

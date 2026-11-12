@@ -441,66 +441,69 @@ def ensure_grafana_datasources(grafana_url: str, auth_header: str, host: str):
     except Exception:
         pass
 
-    # 4. InfluxDB eternal_telemetry Datasource (uid: influxdb-iot)
-    influx_ds = next(
-        (d for d in existing_ds if d.get("uid") == "influxdb-iot" or "influx" in d.get("name", "").lower()),
+    # 4. PostgreSQL eternal_iot Datasource (uid: postgres-iot-db)
+    pg_ds = next(
+        (d for d in existing_ds if d.get("uid") == "postgres-iot-db" or "eternal_iot" in d.get("name", "").lower()),
         None
     )
-    influx_payload = {
-        "name": "InfluxDB - eternal_telemetry",
-        "type": "influxdb",
-        "uid": "influxdb-iot",
+    pg_payload = {
+        "name": "PostgreSQL - eternal_iot",
+        "type": "postgres",
+        "uid": "postgres-iot-db",
         "access": "proxy",
-        "url": f"http://{host}:8086",
+        "url": f"{host}:5432",
+        "user": "appuser",
+        "database": "eternal_iot",
         "isDefault": False,
         "jsonData": {
-            "version": "Flux",
-            "organization": "homelab",
-            "defaultBucket": "eternal_telemetry",
-            "tlsSkipVerify": True
+            "database": "eternal_iot",
+            "sslmode": "disable",
+            "postgresVersion": 1600,
+            "timescaledb": False,
+            "maxOpenConns": 10,
+            "maxIdleConns": 5,
+            "connMaxLifetime": 14400
         },
         "secureJsonData": {
-            "token": "homelab-influxdb-master-auth-token-2026"
+            "password": "admin12345"
         }
     }
-    if influx_ds:
-        uid = influx_ds.get("uid", "influxdb-iot")
+    if pg_ds:
+        uid = pg_ds.get("uid", "postgres-iot-db")
         try:
             req = urllib.request.Request(
                 f"{grafana_url}/api/datasources/uid/{uid}",
-                data=json.dumps(influx_payload).encode(),
+                data=json.dumps(pg_payload).encode(),
                 headers=headers,
                 method="PUT"
             )
             with urllib.request.urlopen(req, timeout=5) as resp:
-                print(f"  [OK] Datasource InfluxDB (uid={uid}) berhasil diperbarui!")
+                print(f"  [OK] Datasource PostgreSQL (uid={uid}) berhasil diperbarui ke 'eternal_iot'")
         except Exception:
-            # File-provisioned datasources di Grafana berstatus read-only dari API, ini normal
             pass
     else:
         try:
             req = urllib.request.Request(
                 f"{grafana_url}/api/datasources",
-                data=json.dumps(influx_payload).encode(),
+                data=json.dumps(pg_payload).encode(),
                 headers=headers,
                 method="POST"
             )
             with urllib.request.urlopen(req, timeout=5) as resp:
-                print("  [OK] Datasource InfluxDB (uid: influxdb-iot) berhasil didaftarkan!")
+                print("  [OK] Datasource PostgreSQL (uid: postgres-iot-db) berhasil didaftarkan ke 'eternal_iot'!")
         except Exception as e:
-            print(f"  [WARN] Gagal membuat datasource InfluxDB: {e}")
+            print(f"  [WARN] Gagal membuat datasource PostgreSQL: {e}")
 
-    # 5. Test InfluxDB datasource health
     try:
-        req = urllib.request.Request(f"{grafana_url}/api/datasources/uid/influxdb-iot/health", headers=headers)
+        req = urllib.request.Request(f"{grafana_url}/api/datasources/uid/postgres-iot-db/health", headers=headers)
         with urllib.request.urlopen(req, timeout=5) as resp:
             health = json.loads(resp.read().decode())
             status = health.get("status", "UNKNOWN")
             msg = health.get("message", "")
             if status == "OK":
-                print(f"  [OK] Verifikasi Koneksi InfluxDB: SEHAT ({msg or 'Datasource Connection OK'})\n")
+                print(f"  [OK] Verifikasi Koneksi PostgreSQL eternal_iot: SEHAT ({msg or 'Database Connection OK'})\n")
             else:
-                print(f"  [WARN] Verifikasi Koneksi InfluxDB: {status} - {msg}\n")
+                print(f"  [WARN] Verifikasi Koneksi PostgreSQL eternal_iot: {status} - {msg}\n")
     except Exception:
         pass
 

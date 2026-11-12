@@ -8,6 +8,25 @@ datasources:
     url: http://prometheus:9090
     isDefault: true
 
+  - name: PostgreSQL - eternal_iot
+    uid: postgres-iot-db
+    type: postgres
+    access: proxy
+    url: 192.168.25.101:5432
+    user: appuser
+    database: eternal_iot
+    isDefault: false
+    jsonData:
+      database: eternal_iot
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
+      maxOpenConns: 10
+      maxIdleConns: 5
+      connMaxLifetime: 14400
+    secureJsonData:
+      password: admin12345
+
   - name: MySQL - eternal_db
     uid: mysql-iot-db
     type: mysql
@@ -25,16 +44,3 @@ datasources:
     secureJsonData:
       password: admin12345
 
-  - name: InfluxDB - eternal_telemetry
-    uid: influxdb-iot
-    type: influxdb
-    access: proxy
-    url: http://192.168.25.101:8086
-    isDefault: false
-    jsonData:
-      version: Flux
-      organization: homelab
-      defaultBucket: eternal_telemetry
-      tlsSkipVerify: true
-    secureJsonData:
-      token: homelab-influxdb-master-auth-token-2026

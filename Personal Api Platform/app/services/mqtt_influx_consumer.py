@@ -1,25 +1,25 @@
 """
-mqtt_influx_consumer.py — Realtime MQTT to InfluxDB IoT Pipeline
-Implements the architecture:
-  ESP32 -> Mosquitto MQTT (:1883) -> Central API Gateway (:8000) -> InfluxDB (:8086) -> Grafana (:3001)
+mqtt_influx_consumer.py — Realtime MQTT to PostgreSQL IoT Pipeline Worker
+Dedicated IoT Project Architecture:
+  Device IoT (ESP32) -> Mosquitto MQTT (:1883) -> Worker API PAP Core -> PostgreSQL eternal_iot (:5432) -> Dashboard Grafana
 
-Runs as a resilient background worker inside PAP Core API Gateway.
+Runs as a background worker inside PAP Core (pap-worker / pap-api).
 """
 
+from datetime import datetime, timezone
 import json
 import os
 import threading
 import time
-from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from app.core.config import get_settings
 from app.core.logging import logger
-from app.services.influxdb_service import influx_service
+from app.modules.iot.nfc_service import get_eternal_pg_conn, NfcService
 
 
-class MqttInfluxConsumer:
-    """Consumes incoming ESP32 IoT telemetry from Mosquitto and stores to InfluxDB."""
+class MqttPgConsumer:
+    """Consumes incoming ESP32 IoT telemetry from Mosquitto and stores to PostgreSQL `eternal_iot`."""
 
     def __init__(self):
         settings = get_settings()
@@ -27,7 +27,7 @@ class MqttInfluxConsumer:
         self.port = int(os.getenv("MQTT_PORT", getattr(settings, "MQTT_PORT", 1883)))
         self.username = os.getenv("MQTT_USERNAME", getattr(settings, "MQTT_USERNAME", "useriot"))
         self.password = os.getenv("MQTT_PASSWORD", getattr(settings, "MQTT_PASSWORD", "25022002"))
-        self.client_id = f"pap-influx-consumer-{int(time.time())}"
+        self.client_id = f"pap-pg-consumer-{int(time.time())}"
         self.client = None
         self.is_running = False
         self.stop_event = threading.Event()
@@ -58,9 +58,9 @@ class MqttInfluxConsumer:
             return
         self.is_running = True
         self.stop_event.clear()
-        self.worker_thread = threading.Thread(target=self._run_loop, daemon=True, name="MqttInfluxWorker")
+        self.worker_thread = threading.Thread(target=self._run_loop, daemon=True, name="MqttPgWorker")
         self.worker_thread.start()
-        logger.info(f"[MQTT->InfluxDB] Background consumer worker started on {self.host}:{self.port}")
+        logger.info(f"[MQTT->PostgreSQL] IoT consumer worker started on {self.host}:{self.port} -> db: eternal_iot")
 
     def stop(self):
         self.is_running = False
@@ -81,7 +81,6 @@ class MqttInfluxConsumer:
             try:
                 import paho.mqtt.client as mqtt
 
-                # Compatibility for paho-mqtt 2.x and 1.x
                 try:
                     client = mqtt.Client(
                         mqtt.CallbackAPIVersion.VERSION2,
@@ -98,7 +97,7 @@ class MqttInfluxConsumer:
                 client.on_message = self._on_message
                 client.on_disconnect = self._on_disconnect
 
-                logger.info(f"[MQTT->InfluxDB] Connecting to Mosquitto {self.host}:{self.port}...")
+                logger.info(f"[MQTT->PostgreSQL] Connecting to Mosquitto {self.host}:{self.port}...")
                 client.connect(self.host, self.port, keepalive=60)
                 client.loop_start()
 
@@ -113,26 +112,26 @@ class MqttInfluxConsumer:
             except Exception as e:
                 if not self.is_running or self.stop_event.is_set():
                     break
-                logger.warning(f"[MQTT->InfluxDB] Connection error: {e}. Retrying in 10s...")
+                logger.warning(f"[MQTT->PostgreSQL] Connection error: {e}. Retrying in 10s...")
                 self.stop_event.wait(timeout=10)
 
     def _on_connect(self, client, userdata, flags, rc, *args):
         if rc == 0:
             self.connected = True
-            logger.info(f"[MQTT->InfluxDB] Connected to broker {self.host}:{self.port}!")
+            logger.info(f"[MQTT->PostgreSQL] Connected to broker {self.host}:{self.port}!")
             for topic, qos in self.topics:
                 client.subscribe(topic, qos)
-                logger.info(f"[MQTT->InfluxDB] Subscribed to topic: {topic}")
+                logger.info(f"[MQTT->PostgreSQL] Subscribed to topic: {topic}")
         else:
             self.connected = False
-            logger.warning(f"[MQTT->InfluxDB] Connect failed with code {rc}")
+            logger.warning(f"[MQTT->PostgreSQL] Connect failed with code {rc}")
 
     def _on_disconnect(self, client, userdata, *args):
         self.connected = False
-        logger.warning("[MQTT->InfluxDB] Disconnected from Mosquitto broker")
+        logger.warning("[MQTT->PostgreSQL] Disconnected from Mosquitto broker")
 
     def _on_message(self, client, userdata, msg):
-        """Process incoming telemetry message and write to InfluxDB."""
+        """Process incoming telemetry message and write to PostgreSQL `eternal_iot`."""
         try:
             self.messages_count += 1
             self.last_message_at = datetime.now(timezone.utc).isoformat()
@@ -146,7 +145,6 @@ class MqttInfluxConsumer:
             try:
                 data = json.loads(raw_payload)
             except Exception:
-                # If plain text or numeric
                 return
 
             if not isinstance(data, dict):
@@ -154,7 +152,7 @@ class MqttInfluxConsumer:
 
             self._process_payload(topic, data)
         except Exception as e:
-            logger.debug(f"[MQTT->InfluxDB] Error handling message on {msg.topic}: {e}")
+            logger.debug(f"[MQTT->PostgreSQL] Error handling message on {msg.topic}: {e}")
 
     def get_status(self) -> Dict[str, Any]:
         """Returns the consumer health status and telemetry counters."""
@@ -162,6 +160,7 @@ class MqttInfluxConsumer:
             "running": self.is_running,
             "connected": self.connected,
             "broker": f"{self.host}:{self.port}",
+            "database": "postgresql://eternal_iot",
             "messages_count": self.messages_count,
             "last_message_at": self.last_message_at,
             "last_topic": self.last_topic,
@@ -169,7 +168,6 @@ class MqttInfluxConsumer:
         }
 
     def _process_payload(self, topic: str, data: Dict[str, Any]):
-        # Extract common fields
         device_serial = (
             data.get("serial")
             or data.get("MCID")
@@ -181,7 +179,7 @@ class MqttInfluxConsumer:
         device_name = data.get("device") or data.get("nama") or "Eternal"
         model = data.get("model") or data.get("IOT_MODEL") or "Eternal-ESP32"
 
-        # 1. NFC RFID Tap Events (hanya dari topik /Eternal/rfid; pesan "registered" = sinkron whitelist, bukan tap)
+        # 1. Handle NFC RFID Tap Events
         is_rfid_topic = topic.lower().rstrip("/").endswith("/rfid") or data.get("event") == "nfc_tap"
         if is_rfid_topic and data.get("status") != "registered" and data.get("action") != "REGISTER_USER":
             uid = data.get("uid")
@@ -189,96 +187,66 @@ class MqttInfluxConsumer:
                 user_name = data.get("nama") or data.get("user") or "Tamu"
                 username = data.get("username") or "-"
                 role = data.get("role") or "Operator"
-                action = data.get("action") or data.get("action_type") or "TAP_ON"
-                status = data.get("status") or "granted"
+                action = data.get("action") or data.get("action_type") or data.get("event") or "TAP_ON"
                 duration = int(data.get("remaining_sec") or data.get("lock_duration_sec") or 7200)
 
-                influx_service.write_nfc_event(
-                    uid=uid,
-                    user_name=user_name,
-                    username=username,
-                    role=role,
-                    action=action,
-                    device_serial=device_serial,
-                    duration_sec=duration,
-                    status=status
-                )
-                logger.info(f"[MQTT->InfluxDB] Recorded NFC event for {user_name} ({uid}) -> InfluxDB")
+                try:
+                    NfcService.record_tap_event({
+                        "uid": uid,
+                        "nama": user_name,
+                        "username": username,
+                        "role": role,
+                        "action_type": action,
+                        "lock_duration_sec": duration,
+                        "device_serial": str(device_serial),
+                        "device_ip": str(data.get("ip") or "192.168.25.104")
+                    })
+                    logger.info(f"[MQTT->PostgreSQL] Recorded NFC event for {user_name} ({uid}) -> PostgreSQL")
+                except Exception as e:
+                    logger.debug(f"[MQTT->PostgreSQL NFC Tap] Error: {e}")
 
-                # Catatan: log MySQL nfc_access_logs ditulis oleh ESP32 langsung via POST /api/nfc/access
-                # (NfcService.record_tap_event) sehingga tidak diduplikasi dari MQTT.
-
-                # Broadcast live event to Architecture Map
+                # Broadcast live event to Architecture Map UI
                 try:
                     from app.modules.traffic.broadcaster import traffic_broadcaster
                     traffic_broadcaster.record_and_broadcast(
                         method="NFC_TAP",
                         path=topic,
-                        status=200 if status == "granted" else 403,
+                        status=200 if data.get("status") != "denied" else 403,
                         duration_ms=1.8,
                         client_ip="192.168.25.104",
                         source="esp32",
                         target="core",
-                        sub_target="mysql",
+                        sub_target="postgresql",
                         tag="NFC_AUTH",
-                        color="#34d399" if status == "granted" else "#ef4444",
-                        detail=f"ESP32 -> Core -> InfluxDB & MySQL eternal_db [UID: {uid} | {user_name} ({role}) -> {status.upper()}]"
+                        color="#34d399" if data.get("status") != "denied" else "#ef4444",
+                        detail=f"ESP32 -> Core -> PostgreSQL eternal_iot [UID: {uid} | {user_name} ({role})]"
                     )
                 except Exception:
                     pass
 
-        # 2. Temperature, Humidity & Telemetry Readings (hanya field yang ada di payload)
-        f = influx_service.parse_telemetry_payload(data)
-        temp_val, hum_val, heat_val = f["temperature"], f["humidity"], f["heat_index"]
-        rssi_val, is_locked = f["rssi"], f["is_locked"]
-        rem_sec, uptime, heap = f["remaining_sec"], f["uptime_sec"], f["free_heap"]
-
-        # Heat index diturunkan dari suhu bila firmware belum mengirimnya
-        if heat_val is None and temp_val is not None and temp_val > 0:
-            heat_val = temp_val
-
+        # 2. Handle Telemetry & Lock State
+        f = self._parse_telemetry(data)
         has_data = any(v is not None for v in f.values())
         if has_data:
-            extra_tags = {}
-            if "ip" in data:
-                extra_tags["ip"] = str(data["ip"])
-            if "mac" in data:
-                extra_tags["mac"] = str(data["mac"])
-
-            ok = influx_service.write_telemetry(
+            self._sync_pg_telemetry(
                 device_serial=str(device_serial),
                 device_name=str(device_name),
                 model=str(model),
-                temperature=temp_val,
-                humidity=hum_val,
-                heat_index=heat_val,
-                rssi=rssi_val,
-                is_locked=is_locked,
-                remaining_sec=rem_sec,
-                uptime_sec=uptime,
-                free_heap=heap,
-                extra_tags=extra_tags
-            )
-            if ok:
-                logger.debug(f"[MQTT->InfluxDB] Wrote telemetry for {device_serial} ({temp_val}°C, {hum_val}%)")
-
-            # Also sync latest snapshot & telemetry row to MySQL eternal_db for Grafana & Web Dashboards
-            self._sync_mysql_telemetry(
-                device_serial=str(device_serial),
-                device_name=str(device_name),
-                temp=temp_val,
-                hum=hum_val,
-                heat_idx=heat_val,
-                rssi=rssi_val,
-                is_locked=is_locked,
-                rem_sec=rem_sec,
-                ip=data.get("ip"),
-                mac=data.get("mac"),
+                temp=f["temperature"],
+                hum=f["humidity"],
+                heat_idx=f["heat_index"],
+                rssi=f["rssi"],
+                is_locked=f["is_locked"],
+                rem_sec=f["remaining_sec"],
+                uptime=f["uptime_sec"],
+                heap=f["free_heap"],
+                ip=data.get("ip") or data.get("MCIP"),
+                mac=data.get("mac") or data.get("MAC"),
                 ssid=data.get("ap") or data.get("ssid"),
                 firmware=data.get("VER"),
             )
 
-            # Broadcast live telemetry stream to Architecture Map
+            # Broadcast live telemetry stream to Architecture Map UI
             try:
                 from app.modules.traffic.broadcaster import traffic_broadcaster
                 traffic_broadcaster.record_and_broadcast(
@@ -289,88 +257,152 @@ class MqttInfluxConsumer:
                     client_ip=str(data.get("ip") or "192.168.25.104"),
                     source="esp32",
                     target="mqtt",
-                    sub_target="influxdb",
+                    sub_target="postgresql",
                     tag="TELEMETRY",
                     color="#06b6d4",
-                    detail=f"ESP32 -> Mosquitto {topic} -> InfluxDB :8086 & MySQL :3306 [Suhu: {temp_val}°C, Hum: {hum_val}%]"
+                    detail=f"ESP32 -> Mosquitto {topic} -> PostgreSQL eternal_iot"
                 )
             except Exception:
                 pass
 
-    def _sync_mysql_telemetry(
+    @staticmethod
+    def _parse_telemetry(payload: Dict[str, Any]) -> Dict[str, Any]:
+        def _num(*keys, cast=float):
+            for k in keys:
+                v = payload.get(k)
+                if v is not None and v != "":
+                    try:
+                        return cast(v)
+                    except (TypeError, ValueError):
+                        return None
+            return None
+
+        is_locked_val = payload.get("is_locked")
+        if is_locked_val is not None:
+            is_locked = 1 if is_locked_val in (1, True, "1", "true") else 0
+        elif payload.get("lock_status") is not None:
+            lock_str = str(payload.get("lock_status", "")).upper()
+            is_locked = 0 if ("UNLOCK" in lock_str or "OPEN" in lock_str) else 1
+        else:
+            is_locked = None
+
+        temp = _num("suhu", "temperature", "temp")
+        hum = _num("humidity", "hum", "kelembapan")
+        heat_idx = _num("heat_index", "heatIndex")
+        if heat_idx is None and temp is not None and temp > 0:
+            heat_idx = temp
+
+        return {
+            "temperature": temp,
+            "humidity": hum,
+            "heat_index": heat_idx,
+            "rssi": _num("rssi", "wifi_rssi", cast=int),
+            "is_locked": is_locked,
+            "remaining_sec": _num("remaining_sec", cast=int),
+            "uptime_sec": _num("uptime_sec", "uptime", cast=int),
+            "free_heap": _num("free_heap", "heap", cast=int),
+        }
+
+    def _sync_pg_telemetry(
         self,
         device_serial: str,
         device_name: str,
+        model: str = "Eternal-ESP32",
         temp=None,
         hum=None,
         heat_idx=None,
         rssi=None,
         is_locked=None,
         rem_sec=None,
+        uptime=None,
+        heap=None,
         ip=None,
         mac=None,
         ssid=None,
         firmware=None,
     ):
-        """Keep MySQL eternal_db snapshot & logs in sync (hanya kolom yang datanya ada di payload)."""
+        """Keep PostgreSQL `eternal_iot` snapshot & logs in sync with incoming MQTT telemetry."""
+        conn = None
         try:
-            from app.modules.iot.nfc_service import get_eternal_mysql_conn
-            conn = get_eternal_mysql_conn()
-            try:
-                with conn.cursor() as cur:
-                    # 1. Update latest snapshot in iot_devices (kolom dinamis, tanpa menimpa dengan nilai palsu)
-                    cols = {"device_name": device_name}
-                    if temp is not None:
-                        cols["temperature_c"] = temp
-                    if hum is not None:
-                        cols["humidity_pct"] = hum
-                    if heat_idx is not None:
-                        cols["heat_index_c"] = heat_idx
-                    if rssi is not None:
-                        cols["wifi_rssi"] = rssi
-                        cols["rssi"] = rssi
-                    if ip:
-                        cols["ip_address"] = str(ip)
-                    if mac:
-                        cols["mac_address"] = str(mac)
-                    if ssid:
-                        cols["ssid"] = str(ssid)
-                    if firmware:
-                        cols["firmware_version"] = str(firmware)
+            conn = get_eternal_pg_conn()
+            with conn.cursor() as cur:
+                # 1. Update latest snapshot in iot_devices
+                cols = {"device_name": device_name}
+                if temp is not None:
+                    cols["temperature_c"] = temp
+                if hum is not None:
+                    cols["humidity_pct"] = hum
+                if heat_idx is not None:
+                    cols["heat_index_c"] = heat_idx
+                if rssi is not None:
+                    cols["wifi_rssi"] = rssi
+                    cols["rssi"] = rssi
+                if uptime is not None:
+                    cols["uptime_sec"] = uptime
+                if heap is not None:
+                    cols["free_heap"] = heap
+                if ip:
+                    cols["ip_address"] = str(ip)
+                if mac:
+                    cols["mac_address"] = str(mac)
+                if ssid:
+                    cols["ssid"] = str(ssid)
+                if firmware:
+                    cols["firmware_version"] = str(firmware)
 
-                    names = ["device_serial", "model", "status", "last_seen_at"] + list(cols.keys())
-                    placeholders = ["%s", "'Eternal-ESP32'", "'online'", "NOW()"] + ["%s"] * len(cols)
-                    updates = ["status = 'online'", "last_seen_at = NOW()"] + [f"{k} = VALUES({k})" for k in cols]
-                    cur.execute(
-                        f"INSERT INTO iot_devices ({', '.join(names)}) VALUES ({', '.join(placeholders)}) "
-                        f"ON DUPLICATE KEY UPDATE {', '.join(updates)};",
-                        [device_serial] + list(cols.values()),
-                    )
+                names = ["device_serial", "model", "status", "last_seen_at", "updated_at"] + list(cols.keys())
+                placeholders = ["%s", "%s", "'online'", "NOW()", "NOW()"] + ["%s"] * len(cols)
+                updates = ["status = 'online'", "last_seen_at = NOW()", "updated_at = NOW()"] + [f"{k} = EXCLUDED.{k}" for k in cols]
 
-                    # 2. Append time-series point to iot_telemetry_logs (hanya bila ada pembacaan sensor)
-                    if temp is not None and hum is not None and (temp > 0 or hum > 0):
-                        cur.execute("""
-                            INSERT INTO iot_telemetry_logs (device_serial, temperature_c, humidity_pct, heat_index_c, wifi_rssi, recorded_at)
-                            VALUES (%s, %s, %s, %s, %s, NOW());
-                        """, (device_serial, temp, hum, heat_idx if heat_idx is not None else temp, rssi or 0))
+                sql_device = f"""
+                    INSERT INTO iot_devices ({', '.join(names)})
+                    VALUES ({', '.join(placeholders)})
+                    ON CONFLICT (device_serial) DO UPDATE
+                    SET {', '.join(updates)};
+                """
+                cur.execute(sql_device, [device_serial, model] + list(cols.values()))
 
-                    # 3. Update device_locks hanya jika status kunci ada di payload
-                    if is_locked is not None:
-                        lock_str = "LOCKED" if is_locked == 1 else "UNLOCKED"
-                        cur.execute("""
-                            UPDATE device_locks
-                            SET is_locked = %s,
-                                lock_status = %s,
-                                unlock_duration_sec = COALESCE(%s, unlock_duration_sec),
-                                updated_at = NOW()
-                            WHERE device_serial = %s;
-                        """, (is_locked, lock_str, rem_sec, device_serial))
-            finally:
-                conn.close()
+                # 2. Append time-series point to iot_telemetry_logs
+                if temp is not None or hum is not None or is_locked is not None:
+                    cur.execute("""
+                        INSERT INTO iot_telemetry_logs
+                            (device_serial, temperature_c, humidity_pct, heat_index_c, wifi_rssi,
+                             is_locked, remaining_sec, uptime_sec, free_heap, recorded_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW());
+                    """, (
+                        device_serial,
+                        temp or 0.0,
+                        hum or 0.0,
+                        heat_idx or 0.0,
+                        rssi or 0,
+                        is_locked if is_locked is not None else 1,
+                        rem_sec or 0,
+                        uptime or 0,
+                        heap or 0,
+                    ))
+
+                # 3. Update device_locks if is_locked is present
+                if is_locked is not None:
+                    lock_str = "LOCKED" if is_locked == 1 else "UNLOCKED"
+                    cur.execute("""
+                        INSERT INTO device_locks
+                            (device_serial, device_name, is_locked, lock_status, unlock_duration_sec, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, NOW())
+                        ON CONFLICT (device_serial) DO UPDATE
+                        SET is_locked = EXCLUDED.is_locked,
+                            lock_status = EXCLUDED.lock_status,
+                            unlock_duration_sec = COALESCE(EXCLUDED.unlock_duration_sec, device_locks.unlock_duration_sec),
+                            updated_at = NOW();
+                    """, (device_serial, device_name, is_locked, lock_str, rem_sec or 7200))
         except Exception as e:
-            logger.debug(f"[MQTT->MySQL Sync] Note: {e}")
+            logger.debug(f"[MQTT->PostgreSQL Sync] Error: {e}")
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
 
 # Global singleton instance
-mqtt_influx_consumer = MqttInfluxConsumer()
-
+mqtt_influx_consumer = MqttPgConsumer()
