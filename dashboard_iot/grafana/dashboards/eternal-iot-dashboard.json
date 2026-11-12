@@ -1,51 +1,121 @@
 {
+  "uid": "eternal-iot-main",
+  "title": "Eternal IoT — ESP32 Smart Lock NFC & Sensor (Homelab)",
+  "tags": [
+    "eternal",
+    "iot",
+    "esp32",
+    "nfc",
+    "influxdb",
+    "mysql"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m"
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "serial",
+        "label": "Perangkat",
+        "type": "custom",
+        "query": "ETL-ESP32-001",
+        "current": {
+          "text": "ETL-ESP32-001",
+          "value": "ETL-ESP32-001"
+        },
+        "options": [
+          {
+            "text": "ETL-ESP32-001",
+            "value": "ETL-ESP32-001",
+            "selected": true
+          }
+        ],
+        "hide": 0,
+        "multi": false,
+        "includeAll": false
+      }
+    ]
+  },
   "annotations": {
     "list": []
   },
-  "description": "Eternal IoT ESP32 Monitoring — MQTT (Telegraf/Prometheus) & MySQL (iot_db) — NFC Tap ON/OFF Lock 2 Jam & DHT11 Telemetry",
-  "editable": true,
-  "fiscalYearStartMonth": 0,
-  "graphTooltip": 1,
-  "id": null,
   "links": [],
   "panels": [
     {
+      "id": 1,
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "### 🔐 Eternal — ESP32 Smart Lock NFC &amp; Sensor DHT11\n**Perangkat:** `ETL-ESP32-001` · FW `3.1.0` · IP `192.168.25.104` &nbsp;|&nbsp; **Mode kunci:** Tap NFC 1× = BUKA (ON) · Tap lagi = KUNCI (OFF) · Auto-Lock **2 jam** &nbsp;|&nbsp; **Alur data:** ESP32 → Mosquitto MQTT → PAP Core API `:8000` → InfluxDB `:8086` / MySQL `eternal_db` → Grafana"
+      },
+      "transparent": true
+    },
+    {
+      "id": 2,
+      "type": "row",
+      "title": "🔐 Status Kunci & Konektivitas (realtime — InfluxDB)",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 0
+        "y": 3
       },
-      "id": 100,
-      "title": "📡 Status Perangkat & Kunci NFC — Pipeline: MQTT → API Gateway → InfluxDB & MySQL",
-      "type": "row"
+      "panels": []
     },
     {
+      "id": 3,
+      "type": "stat",
+      "title": "🔐 Status Kunci",
+      "description": "Status solenoid/relay terakhir dari ESP32 (is_locked: 0 = terbuka, 1 = terkunci).",
       "datasource": {
-        "type": "datasource",
-        "uid": "-- Mixed --"
+        "type": "influxdb",
+        "uid": "influxdb-iot"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-iot"
+          },
+          "refId": "A",
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"is_locked\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_time\", \"_value\"])"
+        }
+      ],
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 0,
+        "y": 4
       },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "thresholds"
           },
-          "mappings": [
-            {
-              "options": {
-                "0": {
-                  "color": "red",
-                  "text": "🔒 OFF (LOCKED)"
-                },
-                "1": {
-                  "color": "green",
-                  "text": "🔓 ON (UNLOCKED 2H)"
-                }
-              },
-              "type": "value"
-            }
-          ],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -55,24 +125,35 @@
               },
               {
                 "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
                 "value": 1
               }
             ]
-          }
-        }
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "🔓 UNLOCKED (ON)",
+                  "color": "green",
+                  "index": 0
+                },
+                "1": {
+                  "text": "🔒 LOCKED (OFF)",
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
       },
-      "gridPos": {
-        "h": 4,
-        "w": 5,
-        "x": 0,
-        "y": 1
-      },
-      "id": 1,
       "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "auto",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -80,43 +161,50 @@
           "fields": "",
           "values": false
         },
-        "textMode": "auto"
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "auto",
+        "orientation": "auto",
+        "text": {
+          "valueSize": 34
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "gauge",
+      "title": "⏳ Sisa Timer Auto-Lock (maks 2 jam)",
+      "description": "Hitung mundur sebelum kunci otomatis terkunci kembali (7200 detik = 2 jam).",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-iot"
       },
-      "title": "🔐 Status Kunci NFC (Tap ON/OFF)",
-      "type": "stat",
       "targets": [
-        {
-          "datasource": {
-            "type": "mysql",
-            "uid": "mysql-iot-db"
-          },
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT CASE WHEN is_locked = 0 THEN 1 ELSE 0 END AS unlock_on FROM device_locks WHERE device_serial = 'ETL-ESP32-001' LIMIT 1;",
-          "refId": "A"
-        },
         {
           "datasource": {
             "type": "influxdb",
             "uid": "influxdb-iot"
           },
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -1h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"_field\"] == \"is_locked\")\n  |> map(fn: (r) => ({r with _value: if r._value == 0 then 1 else 0}))\n  |> last()",
-          "refId": "B"
+          "refId": "A",
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"remaining_sec\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_time\", \"_value\"])"
         }
-      ]
-    },
-    {
-      "datasource": {
-        "type": "datasource",
-        "uid": "-- Mixed --"
+      ],
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 5,
+        "y": 4
       },
       "fieldConfig": {
         "defaults": {
+          "unit": "s",
+          "min": 0,
+          "max": 7200,
+          "decimals": 0,
           "color": {
             "mode": "thresholds"
           },
-          "unit": "s",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -126,63 +214,61 @@
               },
               {
                 "color": "orange",
-                "value": 600
+                "value": 120
+              },
+              {
+                "color": "yellow",
+                "value": 900
               },
               {
                 "color": "green",
                 "value": 1800
               }
             ]
-          }
-        }
+          },
+          "mappings": []
+        },
+        "overrides": []
       },
-      "gridPos": {
-        "h": 4,
-        "w": 5,
-        "x": 5,
-        "y": 1
-      },
-      "id": 2,
       "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "center",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
           ],
           "fields": "",
           "values": false
-        }
-      },
-      "title": "⏳ Sisa Timer Auto-Lock (Maks 2 Jam)",
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      }
+    },
+    {
+      "id": 5,
       "type": "stat",
+      "title": "🪪 Tap NFC Terakhir",
+      "description": "Pengguna kartu NFC yang terakhir tap (dari tabel nfc_access_logs).",
+      "datasource": {
+        "type": "mysql",
+        "uid": "mysql-iot-db"
+      },
       "targets": [
         {
           "datasource": {
             "type": "mysql",
             "uid": "mysql-iot-db"
           },
+          "refId": "A",
+          "rawQuery": true,
           "editorMode": "code",
           "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT CASE WHEN is_locked = 0 AND unlock_expires_at > NOW() THEN TIMESTAMPDIFF(SECOND, NOW(), unlock_expires_at) ELSE 0 END AS remaining_sec FROM device_locks WHERE device_serial = 'ETL-ESP32-001' LIMIT 1;",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "influxdb",
-            "uid": "influxdb-iot"
-          },
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -1h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"_field\"] == \"remaining_sec\")\n  |> last()",
-          "refId": "B"
+          "rawSql": "SELECT CONCAT(nama, ' (', uid, ')') AS 'Pengguna' FROM nfc_access_logs WHERE action_type IN ('NFC_TAP_ON_UNLOCK','NFC_TAP_OFF_LOCK','NFC_REGISTER_UNLOCK','TAP_ON','TAP_OFF','NFC_DENIED') ORDER BY id DESC LIMIT 1;"
         }
-      ]
-    },
-    {
-      "datasource": {
-        "type": "datasource",
-        "uid": "-- Mixed --"
+      ],
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 10,
+        "y": 4
       },
       "fieldConfig": {
         "defaults": {
@@ -197,211 +283,242 @@
                 "value": null
               }
             ]
-          }
-        }
+          },
+          "mappings": []
+        },
+        "overrides": []
       },
-      "gridPos": {
-        "h": 4,
-        "w": 5,
-        "x": 10,
-        "y": 1
-      },
-      "id": 3,
       "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
           ],
-          "fields": "/^unlocked_by_name$/",
+          "fields": "",
           "values": false
         },
-        "textMode": "value"
-      },
-      "title": "🪪 Pengguna NFC Terakhir",
-      "type": "stat",
-      "targets": [
-        {
-          "datasource": {
-            "type": "mysql",
-            "uid": "mysql-iot-db"
-          },
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT COALESCE(CONCAT(unlocked_by_name, ' (', unlocked_by_uid, ')'), '-') AS unlocked_by_name FROM device_locks WHERE device_serial = 'ETL-ESP32-001' LIMIT 1;",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [
-            {
-              "options": {
-                "0": {
-                  "color": "red",
-                  "text": "OFFLINE"
-                },
-                "1": {
-                  "color": "green",
-                  "text": "ONLINE (MQTT)"
-                }
-              },
-              "type": "value"
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 1
-              }
-            ]
-          }
-        }
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 15,
-        "y": 1
-      },
-      "id": 4,
-      "options": {
-        "colorMode": "background",
+        "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
+        "textMode": "value",
+        "orientation": "auto",
+        "text": {
+          "valueSize": 22
         }
-      },
-      "title": "📡 Pipeline Status: MQTT → API → InfluxDB",
-      "type": "stat",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sysctrl_STS{MCID=\"ETL-ESP32-001\"} or sysctrl_STS or vector(1)",
-          "refId": "A"
-        }
-      ]
+      }
     },
     {
-      "datasource": {
-        "type": "datasource",
-        "uid": "-- Mixed --"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "dBm",
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": -75
-              },
-              {
-                "color": "green",
-                "value": -65
-              }
-            ]
-          }
-        }
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 5,
-        "x": 19,
-        "y": 1
-      },
-      "id": 5,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "center",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
-        }
-      },
-      "title": "📶 Sinyal WiFi (RSSI)",
+      "id": 6,
       "type": "stat",
+      "title": "📡 Koneksi ESP32",
+      "description": "ONLINE bila ada data masuk ke InfluxDB dalam 90 detik terakhir.",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-iot"
+      },
       "targets": [
         {
           "datasource": {
             "type": "influxdb",
             "uid": "influxdb-iot"
           },
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"_field\"] == \"rssi\")\n  |> last()",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "mysql",
-            "uid": "mysql-iot-db"
-          },
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT wifi_rssi FROM iot_devices WHERE device_serial = 'ETL-ESP32-001' LIMIT 1;",
-          "refId": "B"
+          "refId": "A",
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"rssi\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> map(fn: (r) => ({r with _value: (int(v: now()) - int(v: r._time)) / 1000000000}))\n  |> keep(columns: [\"_time\", \"_value\"])"
         }
-      ]
+      ],
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 16,
+        "y": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "range",
+              "options": {
+                "from": 0,
+                "to": 90,
+                "result": {
+                  "text": "ONLINE",
+                  "color": "green",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "range",
+              "options": {
+                "from": 90,
+                "to": 999999999,
+                "result": {
+                  "text": "OFFLINE",
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "auto",
+        "orientation": "auto",
+        "text": {
+          "valueSize": 30
+        }
+      }
     },
     {
+      "id": 7,
+      "type": "stat",
+      "title": "📶 Sinyal WiFi",
+      "description": "RSSI WiFi ESP32. ≥ -60 sangat kuat · ≥ -70 baik · ≥ -80 sedang · lebih rendah lemah.",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-iot"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-iot"
+          },
+          "refId": "A",
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"rssi\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_time\", \"_value\"])"
+        }
+      ],
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 20,
+        "y": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": -80
+              },
+              {
+                "color": "yellow",
+                "value": -70
+              },
+              {
+                "color": "green",
+                "value": -60
+              }
+            ]
+          },
+          "mappings": [],
+          "unit": "dBm",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "auto",
+        "orientation": "auto",
+        "text": {
+          "valueSize": 34
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "row",
+      "title": "🌡️ Sensor DHT11 — Suhu, Kelembapan & Heat Index",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 5
+        "y": 9
       },
-      "id": 101,
-      "title": "🌡️ Sensor Suhu, Kelembapan & Heat Index Realtime (InfluxDB TSDB, MQTT & MySQL)",
-      "type": "row"
+      "panels": []
     },
     {
+      "id": 9,
+      "type": "gauge",
+      "title": "🌡️ Suhu Udara",
+      "description": "Suhu terakhir dari DHT11.",
       "datasource": {
-        "type": "datasource",
-        "uid": "-- Mixed --"
+        "type": "influxdb",
+        "uid": "influxdb-iot"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-iot"
+          },
+          "refId": "A",
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"temperature\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_time\", \"_value\"])"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 0,
+        "y": 10
       },
       "fieldConfig": {
         "defaults": {
+          "unit": "celsius",
+          "min": 10,
+          "max": 50,
+          "decimals": 1,
           "color": {
             "mode": "thresholds"
           },
-          "max": 50,
-          "min": 0,
-          "unit": "celsius",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -411,82 +528,72 @@
               },
               {
                 "color": "green",
-                "value": 20
+                "value": 22
               },
               {
                 "color": "yellow",
-                "value": 30
+                "value": 29
+              },
+              {
+                "color": "orange",
+                "value": 33
               },
               {
                 "color": "red",
-                "value": 36
+                "value": 38
               }
             ]
-          }
-        }
+          },
+          "mappings": []
+        },
+        "overrides": []
       },
-      "gridPos": {
-        "h": 8,
-        "w": 4,
-        "x": 0,
-        "y": 6
-      },
-      "id": 6,
       "options": {
-        "orientation": "auto",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
-          ]
+          ],
+          "fields": "",
+          "values": false
         },
         "showThresholdLabels": false,
         "showThresholdMarkers": true
-      },
-      "title": "🌡️ Suhu Udara (°C)",
+      }
+    },
+    {
+      "id": 10,
       "type": "gauge",
+      "title": "💧 Kelembapan",
+      "description": "Kelembapan relatif terakhir dari DHT11 (ideal 35–70%).",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-iot"
+      },
       "targets": [
         {
           "datasource": {
             "type": "influxdb",
             "uid": "influxdb-iot"
           },
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"_field\"] == \"temperature\")\n  |> last()",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "mysql",
-            "uid": "mysql-iot-db"
-          },
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT temperature_c FROM iot_devices WHERE device_serial = 'ETL-ESP32-001' LIMIT 1;",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sysctrl_suhu{MCID=\"ETL-ESP32-001\"} or sysctrl_suhu or eternal_iot_suhu",
-          "refId": "C"
+          "refId": "A",
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"humidity\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_time\", \"_value\"])"
         }
-      ]
-    },
-    {
-      "datasource": {
-        "type": "datasource",
-        "uid": "-- Mixed --"
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 4,
+        "y": 10
       },
       "fieldConfig": {
         "defaults": {
+          "unit": "humidity",
+          "min": 0,
+          "max": 100,
+          "decimals": 1,
           "color": {
             "mode": "thresholds"
           },
-          "max": 100,
-          "min": 0,
-          "unit": "percent",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -496,69 +603,236 @@
               },
               {
                 "color": "green",
-                "value": 40
+                "value": 35
               },
               {
-                "color": "blue",
-                "value": 75
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 85
               }
             ]
-          }
-        }
+          },
+          "mappings": []
+        },
+        "overrides": []
       },
-      "gridPos": {
-        "h": 8,
-        "w": 4,
-        "x": 4,
-        "y": 6
-      },
-      "id": 7,
       "options": {
-        "orientation": "auto",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
-          ]
+          ],
+          "fields": "",
+          "values": false
         },
         "showThresholdLabels": false,
         "showThresholdMarkers": true
+      }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "🥵 Heat Index",
+      "description": "Indeks panas (suhu yang dirasakan).",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-iot"
       },
-      "title": "💧 Kelembapan (%)",
-      "type": "gauge",
       "targets": [
         {
           "datasource": {
             "type": "influxdb",
             "uid": "influxdb-iot"
           },
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"_field\"] == \"humidity\")\n  |> last()",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "mysql",
-            "uid": "mysql-iot-db"
-          },
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT humidity_pct FROM iot_devices WHERE device_serial = 'ETL-ESP32-001' LIMIT 1;",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sysctrl_humidity{MCID=\"ETL-ESP32-001\"} or sysctrl_humidity or eternal_iot_humidity",
-          "refId": "C"
+          "refId": "A",
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"heat_index\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_time\", \"_value\"])"
         }
-      ]
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 27
+              },
+              {
+                "color": "orange",
+                "value": 32
+              },
+              {
+                "color": "red",
+                "value": 41
+              }
+            ]
+          },
+          "mappings": [],
+          "unit": "celsius",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "auto",
+        "orientation": "auto",
+        "text": {
+          "valueSize": 34
+        }
+      }
     },
     {
+      "id": 12,
+      "type": "stat",
+      "title": "🏠 Kenyamanan Ruangan",
+      "description": "Klasifikasi sama seperti di firmware (getAirQualityStatus).",
       "datasource": {
-        "type": "datasource",
-        "uid": "-- Mixed --"
+        "type": "influxdb",
+        "uid": "influxdb-iot"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-iot"
+          },
+          "refId": "A",
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"temperature\" or r[\"_field\"] == \"humidity\")\n  |> filter(fn: (r) => r[\"_value\"] > 0.0)\n  |> group(columns: [\"_field\"])\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> group()\n  |> keep(columns: [\"_measurement\", \"_field\", \"_value\"])\n  |> pivot(rowKey: [\"_measurement\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> map(fn: (r) => ({_time: now(), _value:\n        if r.temperature < 22.0 then \"Sejuk\"\n        else if r.temperature <= 28.5 and r.humidity >= 35.0 and r.humidity <= 70.0 then \"Nyaman Ideal\"\n        else if r.temperature <= 32.0 then \"Hangat\"\n        else \"Panas\"}))\n  |> keep(columns: [\"_time\", \"_value\"])"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 14
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "Sejuk": {
+                  "text": "Sejuk",
+                  "color": "blue",
+                  "index": 0
+                },
+                "Nyaman Ideal": {
+                  "text": "Nyaman Ideal",
+                  "color": "green",
+                  "index": 1
+                },
+                "Hangat": {
+                  "text": "Hangat",
+                  "color": "yellow",
+                  "index": 2
+                },
+                "Panas": {
+                  "text": "Panas",
+                  "color": "red",
+                  "index": 3
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "orientation": "auto",
+        "text": {
+          "valueSize": 26
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "📈 Riwayat Suhu, Kelembapan & Heat Index (InfluxDB)",
+      "description": "",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-iot"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-iot"
+          },
+          "refId": "A",
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"temperature\")\n  |> filter(fn: (r) => r[\"_value\"] > 0.0)\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> rename(columns: {_value: \"Suhu (°C)\"})\n  |> keep(columns: [\"_time\", \"Suhu (°C)\"])"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-iot"
+          },
+          "refId": "B",
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"heat_index\")\n  |> filter(fn: (r) => r[\"_value\"] > 0.0)\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> rename(columns: {_value: \"Heat Index (°C)\"})\n  |> keep(columns: [\"_time\", \"Heat Index (°C)\"])"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-iot"
+          },
+          "refId": "C",
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"humidity\")\n  |> filter(fn: (r) => r[\"_value\"] > 0.0)\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> rename(columns: {_value: \"Kelembapan (%)\"})\n  |> keep(columns: [\"_time\", \"Kelembapan (%)\"])"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 10
       },
       "fieldConfig": {
         "defaults": {
@@ -566,206 +840,1524 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisPlacement": "auto",
             "drawStyle": "line",
-            "fillOpacity": 18,
-            "lineInterpolation": "smooth",
             "lineWidth": 2,
-            "showPoints": "auto"
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisPlacement": "auto",
+            "barAlignment": 0
+          },
+          "unit": "celsius"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Suhu (°C)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Heat Index (°C)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Kelembapan (%)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              },
+              {
+                "id": "unit",
+                "value": "humidity"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 100
+              }
+            ]
           }
-        }
+        ]
       },
-      "gridPos": {
-        "h": 8,
-        "w": 16,
-        "x": 8,
-        "y": 6
-      },
-      "id": 8,
       "options": {
         "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
           "calcs": [
             "lastNotNull",
             "min",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
+            "max",
+            "mean"
+          ]
         },
         "tooltip": {
           "mode": "multi",
-          "sort": "none"
+          "sort": "desc"
         }
+      }
+    },
+    {
+      "id": 14,
+      "type": "row",
+      "title": "🔓 Riwayat Buka/Kunci & Telemetri Perangkat",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 18
       },
-      "title": "📈 Grafik Riwayat Suhu (°C), Kelembapan (%) & Heat Index (Pipeline: InfluxDB + MySQL + MQTT)",
-      "type": "timeseries",
+      "panels": []
+    },
+    {
+      "id": 15,
+      "type": "state-timeline",
+      "title": "🔐 Timeline Status Kunci (Terbuka / Terkunci)",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-iot"
+      },
       "targets": [
         {
           "datasource": {
             "type": "influxdb",
             "uid": "influxdb-iot"
           },
-          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"_field\"] == \"temperature\" or r[\"_field\"] == \"humidity\" or r[\"_field\"] == \"heat_index\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield(name: \"mean\")",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "mysql",
-            "uid": "mysql-iot-db"
-          },
-          "editorMode": "code",
-          "format": "time_series",
-          "rawQuery": true,
-          "rawSql": "SELECT UNIX_TIMESTAMP(recorded_at) AS time, temperature_c AS 'Suhu (°C)', humidity_pct AS 'Kelembapan (%)', heat_index_c AS 'Heat Index (°C)' FROM iot_telemetry_logs WHERE $__timeFilter(recorded_at) OR recorded_at >= NOW() - INTERVAL 12 HOUR ORDER BY recorded_at ASC;",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sysctrl_suhu{MCID=\"ETL-ESP32-001\"} or sysctrl_suhu or eternal_iot_suhu",
-          "legendFormat": "MQTT Suhu (°C)",
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sysctrl_humidity{MCID=\"ETL-ESP32-001\"} or sysctrl_humidity or eternal_iot_humidity",
-          "legendFormat": "MQTT Humidity (%)",
-          "refId": "D"
+          "refId": "A",
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"is_locked\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> rename(columns: {_value: \"Kunci\"})\n  |> keep(columns: [\"_time\", \"Kunci\"])"
         }
-      ]
+      ],
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 19
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "🔓 TERBUKA",
+                  "color": "green",
+                  "index": 0
+                },
+                "1": {
+                  "text": "🔒 TERKUNCI",
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 0
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "mergeValues": true,
+        "showValue": "auto",
+        "alignValue": "center",
+        "rowHeight": 0.8,
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
     },
     {
+      "id": 16,
+      "type": "timeseries",
+      "title": "📶 Riwayat Sinyal WiFi (RSSI)",
+      "description": "",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-iot"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-iot"
+          },
+          "refId": "A",
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"rssi\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> rename(columns: {_value: \"RSSI (dBm)\"})\n  |> keep(columns: [\"_time\", \"RSSI (dBm)\"])"
+        }
+      ],
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisPlacement": "auto",
+            "barAlignment": 0
+          },
+          "unit": "dBm",
+          "min": -100,
+          "max": -30
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "RSSI (dBm)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "🧠 Free Heap ESP32",
+      "description": "Memori bebas terendah per interval. Turun terus-menerus = indikasi memory leak.",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-iot"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-iot"
+          },
+          "refId": "A",
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"free_heap\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: min, createEmpty: false)\n  |> rename(columns: {_value: \"Free Heap (byte)\"})\n  |> keep(columns: [\"_time\", \"Free Heap (byte)\"])"
+        }
+      ],
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisPlacement": "auto",
+            "barAlignment": 0
+          },
+          "unit": "bytes"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Free Heap (byte)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "⏱️ Uptime ESP32",
+      "description": "Kurva naik terus = stabil. Turun ke 0 = ESP32 restart / reboot.",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-iot"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-iot"
+          },
+          "refId": "A",
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"uptime_sec\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> rename(columns: {_value: \"Uptime (s)\"})\n  |> keep(columns: [\"_time\", \"Uptime (s)\"])"
+        }
+      ],
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisPlacement": "auto",
+            "barAlignment": 0
+          },
+          "unit": "s"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Uptime (s)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 19,
+      "type": "row",
+      "title": "🪪 Aktivitas Kartu NFC (MySQL eternal_db)",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 14
+        "y": 31
       },
-      "id": 102,
-      "title": "🪪 Riwayat Tap Kartu NFC & Daftar Pengguna Terdaftar (MySQL eternal_db)",
-      "type": "row"
+      "panels": []
     },
     {
+      "id": 20,
+      "type": "stat",
+      "title": "✅ Akses Berhasil (rentang waktu)",
+      "description": "Jumlah tap yang membuka/mengunci pada rentang waktu dashboard.",
       "datasource": {
-        "type": "datasource",
-        "uid": "-- Mixed --"
+        "type": "mysql",
+        "uid": "mysql-iot-db"
       },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          }
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 14,
-        "x": 0,
-        "y": 15
-      },
-      "id": 9,
-      "options": {
-        "showHeader": true,
-        "footer": {
-          "show": false
-        }
-      },
-      "title": "📋 Log Akses Tap NFC (Buka Kunci ON 2 Jam / Kunci OFF)",
-      "type": "table",
       "targets": [
         {
           "datasource": {
             "type": "mysql",
             "uid": "mysql-iot-db"
           },
+          "refId": "A",
+          "rawQuery": true,
           "editorMode": "code",
           "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT created_at AS 'Waktu Tap', uid AS 'UID NFC', nama AS 'Nama Pengguna', username AS 'Username', role AS 'Role', action_type AS 'Aksi (ON/OFF)', lock_duration_sec AS 'Durasi Kunci (s)', device_ip AS 'IP ESP32' FROM nfc_access_logs ORDER BY id DESC LIMIT 50;",
-          "refId": "A"
+          "rawSql": "SELECT COUNT(*) AS 'Akses Berhasil' FROM nfc_access_logs WHERE $__timeFilter(created_at) AND action_type IN ('NFC_TAP_ON_UNLOCK','NFC_TAP_OFF_LOCK','NFC_REGISTER_UNLOCK','TAP_ON','TAP_OFF');"
         }
-      ]
-    },
-    {
-      "datasource": {
-        "type": "datasource",
-        "uid": "-- Mixed --"
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 32
       },
       "fieldConfig": {
         "defaults": {
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          }
-        }
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
       },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "auto",
+        "orientation": "auto",
+        "text": {
+          "valueSize": 40
+        }
+      }
+    },
+    {
+      "id": 21,
+      "type": "stat",
+      "title": "⛔ Akses Ditolak (rentang waktu)",
+      "description": "Kartu tidak terdaftar yang mencoba akses. Banyak penolakan = periksa keamanan.",
+      "datasource": {
+        "type": "mysql",
+        "uid": "mysql-iot-db"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "mysql",
+            "uid": "mysql-iot-db"
+          },
+          "refId": "A",
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS 'Ditolak' FROM nfc_access_logs WHERE $__timeFilter(created_at) AND action_type = 'NFC_DENIED';"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "auto",
+        "orientation": "auto",
+        "text": {
+          "valueSize": 40
+        }
+      }
+    },
+    {
+      "id": 22,
+      "type": "stat",
+      "title": "👥 Kartu NFC Aktif",
+      "description": "",
+      "datasource": {
+        "type": "mysql",
+        "uid": "mysql-iot-db"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "mysql",
+            "uid": "mysql-iot-db"
+          },
+          "refId": "A",
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS 'Kartu Aktif' FROM nfc_users WHERE is_active = 1;"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "auto",
+        "orientation": "auto",
+        "text": {
+          "valueSize": 40
+        }
+      }
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "🕒 Tap Terakhir",
+      "description": "Waktu tap kartu terakhir.",
+      "datasource": {
+        "type": "mysql",
+        "uid": "mysql-iot-db"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "mysql",
+            "uid": "mysql-iot-db"
+          },
+          "refId": "A",
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT MAX(created_at) AS 'Tap Terakhir' FROM nfc_access_logs WHERE action_type IN ('NFC_TAP_ON_UNLOCK','NFC_TAP_OFF_LOCK','NFC_REGISTER_UNLOCK','TAP_ON','TAP_OFF','NFC_DENIED');"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "orientation": "auto",
+        "text": {
+          "valueSize": 22
+        }
+      }
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "📊 Aktivitas Tap per Jam",
+      "description": "",
+      "datasource": {
+        "type": "mysql",
+        "uid": "mysql-iot-db"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "mysql",
+            "uid": "mysql-iot-db"
+          },
+          "refId": "A",
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(created_at, 1h), SUM(action_type IN ('NFC_TAP_ON_UNLOCK','NFC_TAP_OFF_LOCK','NFC_REGISTER_UNLOCK','TAP_ON','TAP_OFF')) AS 'Berhasil', SUM(action_type = 'NFC_DENIED') AS 'Ditolak' FROM nfc_access_logs WHERE $__timeFilter(created_at) GROUP BY 1 ORDER BY 1;"
+        }
+      ],
       "gridPos": {
         "h": 8,
         "w": 10,
-        "x": 14,
-        "y": 15
+        "x": 0,
+        "y": 36
       },
-      "id": 10,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 2,
+            "fillOpacity": 80,
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "axisPlacement": "auto",
+            "barAlignment": 0
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Berhasil"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Ditolak"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
       "options": {
-        "showHeader": true,
-        "footer": {
-          "show": false
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
         }
+      }
+    },
+    {
+      "id": 25,
+      "type": "piechart",
+      "title": "🥧 Tap per Pengguna",
+      "datasource": {
+        "type": "mysql",
+        "uid": "mysql-iot-db"
       },
-      "title": "👥 Daftar Pengguna Kartu NFC Terdaftar (nfc_users)",
-      "type": "table",
       "targets": [
         {
           "datasource": {
             "type": "mysql",
             "uid": "mysql-iot-db"
           },
+          "refId": "A",
+          "rawQuery": true,
           "editorMode": "code",
           "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT uid AS 'UID NFC', nama AS 'Nama Lengkap', username AS 'Username', role AS 'Role', CASE WHEN is_active = 1 THEN 'AKTIF' ELSE 'NONAKTIF' END AS 'Status', total_taps AS 'Total Tap', COALESCE(last_tap_at, last_login_at, '-') AS 'Tap Terakhir' FROM nfc_users ORDER BY id ASC;",
-          "refId": "A"
+          "rawSql": "SELECT nama AS 'Pengguna', COUNT(*) AS 'Tap' FROM nfc_access_logs WHERE $__timeFilter(created_at) AND action_type IN ('NFC_TAP_ON_UNLOCK','NFC_TAP_OFF_LOCK','NFC_REGISTER_UNLOCK','TAP_ON','TAP_OFF') GROUP BY nama ORDER BY 2 DESC;"
         }
-      ]
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 10,
+        "y": 36
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/^Tap$/",
+          "values": true
+        },
+        "pieType": "donut",
+        "displayLabels": [
+          "name",
+          "value"
+        ],
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    },
+    {
+      "id": 26,
+      "type": "table",
+      "title": "👥 Daftar Pengguna Kartu NFC",
+      "description": "",
+      "datasource": {
+        "type": "mysql",
+        "uid": "mysql-iot-db"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "mysql",
+            "uid": "mysql-iot-db"
+          },
+          "refId": "A",
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT uid AS 'UID', nama AS 'Nama', username AS 'Username', role AS 'Role', CASE WHEN is_active = 1 THEN '✅ AKTIF' ELSE '⛔ NONAKTIF' END AS 'Status', total_taps AS 'Total Tap', COALESCE(last_login_at, '-') AS 'Tap Terakhir' FROM nfc_users ORDER BY id ASC;"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 36
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "✅ AKTIF": {
+                        "color": "green",
+                        "index": 0,
+                        "text": "✅ AKTIF"
+                      },
+                      "⛔ NONAKTIF": {
+                        "color": "red",
+                        "index": 1,
+                        "text": "⛔ NONAKTIF"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Role"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "Superadmin": {
+                        "color": "purple",
+                        "index": 0,
+                        "text": "Superadmin"
+                      },
+                      "Admin": {
+                        "color": "orange",
+                        "index": 1,
+                        "text": "Admin"
+                      },
+                      "Operator": {
+                        "color": "blue",
+                        "index": 2,
+                        "text": "Operator"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "id": 27,
+      "type": "table",
+      "title": "📋 Log Akses NFC (Buka / Kunci / Ditolak)",
+      "description": "",
+      "datasource": {
+        "type": "mysql",
+        "uid": "mysql-iot-db"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "mysql",
+            "uid": "mysql-iot-db"
+          },
+          "refId": "A",
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT created_at AS 'Waktu', uid AS 'UID', nama AS 'Nama', role AS 'Role', CASE action_type\n    WHEN 'NFC_TAP_ON_UNLOCK'    THEN '🔓 Buka Kunci (Tap ON)'\n    WHEN 'TAP_ON'               THEN '🔓 Buka Kunci (Tap ON)'\n    WHEN 'NFC_REGISTER_UNLOCK'  THEN '🔓 Buka Kunci (Daftar Kartu)'\n    WHEN 'NFC_TAP_OFF_LOCK'     THEN '🔒 Kunci (Tap OFF)'\n    WHEN 'TAP_OFF'              THEN '🔒 Kunci (Tap OFF)'\n    WHEN 'AUTO_LOCK_2H'         THEN '⏲️ Auto-Lock 2 Jam'\n    WHEN 'NFC_DENIED'           THEN '⛔ Ditolak (Kartu Tidak Terdaftar)'\n    WHEN 'MQTT_REMOTE_UNLOCK'   THEN '🌐 Remote Buka (MQTT)'\n    WHEN 'MQTT_REMOTE_LOCK'     THEN '🌐 Remote Kunci (MQTT)'\n    WHEN 'MQTT_REMOTE_TOGGLE_ON'  THEN '🌐 Remote Buka (MQTT)'\n    WHEN 'MQTT_REMOTE_TOGGLE_OFF' THEN '🌐 Remote Kunci (MQTT)'\n    ELSE action_type END AS 'Aksi', lock_duration_sec AS 'Durasi (s)', device_ip AS 'IP ESP32' FROM nfc_access_logs WHERE $__timeFilter(created_at) AND action_type <> 'REGISTER_USER' ORDER BY id DESC LIMIT 100;"
+        }
+      ],
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 44
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Aksi"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "🔓 Buka Kunci (Tap ON)": {
+                        "color": "green",
+                        "index": 0,
+                        "text": "🔓 Buka Kunci (Tap ON)"
+                      },
+                      "🔓 Buka Kunci (Daftar Kartu)": {
+                        "color": "green",
+                        "index": 1,
+                        "text": "🔓 Buka Kunci (Daftar Kartu)"
+                      },
+                      "🔒 Kunci (Tap OFF)": {
+                        "color": "yellow",
+                        "index": 2,
+                        "text": "🔒 Kunci (Tap OFF)"
+                      },
+                      "⏲️ Auto-Lock 2 Jam": {
+                        "color": "orange",
+                        "index": 3,
+                        "text": "⏲️ Auto-Lock 2 Jam"
+                      },
+                      "⛔ Ditolak (Kartu Tidak Terdaftar)": {
+                        "color": "red",
+                        "index": 4,
+                        "text": "⛔ Ditolak (Kartu Tidak Terdaftar)"
+                      },
+                      "🌐 Remote Buka (MQTT)": {
+                        "color": "blue",
+                        "index": 5,
+                        "text": "🌐 Remote Buka (MQTT)"
+                      },
+                      "🌐 Remote Kunci (MQTT)": {
+                        "color": "blue",
+                        "index": 6,
+                        "text": "🌐 Remote Kunci (MQTT)"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "id": 28,
+      "type": "row",
+      "title": "📡 Info Perangkat & Kesehatan Pipeline",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 53
+      },
+      "panels": []
+    },
+    {
+      "id": 29,
+      "type": "stat",
+      "title": "⏱️ Uptime",
+      "description": "Lama ESP32 menyala sejak boot terakhir.",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-iot"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-iot"
+          },
+          "refId": "A",
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"uptime_sec\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_time\", \"_value\"])"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 54
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [],
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "auto",
+        "orientation": "auto",
+        "text": {
+          "valueSize": 28
+        }
+      }
+    },
+    {
+      "id": 30,
+      "type": "stat",
+      "title": "🧠 Free Heap",
+      "description": "Memori bebas ESP32 saat ini.",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-iot"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-iot"
+          },
+          "refId": "A",
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"free_heap\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_time\", \"_value\"])"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 54
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 60000
+              },
+              {
+                "color": "green",
+                "value": 100000
+              }
+            ]
+          },
+          "mappings": [],
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "auto",
+        "orientation": "auto",
+        "text": {
+          "valueSize": 28
+        }
+      }
+    },
+    {
+      "id": 31,
+      "type": "stat",
+      "title": "📥 Data Masuk InfluxDB (1 jam)",
+      "description": "Jumlah titik telemetri yang masuk 1 jam terakhir. 0 = pipeline MQTT → API → InfluxDB terputus.",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-iot"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-iot"
+          },
+          "refId": "A",
+          "query": "from(bucket: \"eternal_telemetry\")\n  |> range(start: -1h)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"iot_telemetry\")\n  |> filter(fn: (r) => r[\"serial\"] == \"${serial}\")\n  |> filter(fn: (r) => r[\"_field\"] == \"rssi\")\n  |> group()\n  |> count()"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 8,
+        "y": 54
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "auto",
+        "orientation": "auto",
+        "text": {
+          "valueSize": 28
+        }
+      }
+    },
+    {
+      "id": 32,
+      "type": "stat",
+      "title": "🔄 Sinkron MySQL (iot_devices)",
+      "description": "Apakah snapshot perangkat di MySQL eternal_db diperbarui dalam 2 menit terakhir.",
+      "datasource": {
+        "type": "mysql",
+        "uid": "mysql-iot-db"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "mysql",
+            "uid": "mysql-iot-db"
+          },
+          "refId": "A",
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT CASE WHEN updated_at IS NULL THEN 'BELUM ADA DATA' WHEN TIMESTAMPDIFF(SECOND, updated_at, NOW()) <= 120 THEN 'TERSINKRON' ELSE 'TERTINGGAL' END AS 'Sinkron' FROM iot_devices WHERE device_serial = '${serial}' LIMIT 1;"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 10,
+        "x": 14,
+        "y": 54
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "TERSINKRON": {
+                  "text": "TERSINKRON",
+                  "color": "green",
+                  "index": 0
+                },
+                "TERTINGGAL": {
+                  "text": "TERTINGGAL",
+                  "color": "orange",
+                  "index": 1
+                },
+                "BELUM ADA DATA": {
+                  "text": "BELUM ADA DATA",
+                  "color": "red",
+                  "index": 2
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "orientation": "auto",
+        "text": {
+          "valueSize": 24
+        }
+      }
+    },
+    {
+      "id": 33,
+      "type": "table",
+      "title": "🖥️ Info Perangkat Terdaftar (iot_devices)",
+      "description": "",
+      "datasource": {
+        "type": "mysql",
+        "uid": "mysql-iot-db"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "mysql",
+            "uid": "mysql-iot-db"
+          },
+          "refId": "A",
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT device_serial AS 'Serial', device_name AS 'Nama', model AS 'Model', ip_address AS 'IP', mac_address AS 'MAC', ssid AS 'SSID', firmware_version AS 'Firmware', wifi_rssi AS 'RSSI (dBm)', status AS 'Status', last_seen_at AS 'Terakhir Terlihat' FROM iot_devices ORDER BY device_serial;"
+        }
+      ],
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 58
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "online": {
+                        "color": "green",
+                        "index": 0,
+                        "text": "online"
+                      },
+                      "offline": {
+                        "color": "red",
+                        "index": 1,
+                        "text": "offline"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
     }
-  ],
-  "refresh": "5s",
-  "schemaVersion": 38,
-  "tags": [
-    "iot",
-    "eternal",
-    "esp32",
-    "homelab",
-    "nfc",
-    "mysql",
-    "mqtt"
-  ],
-  "templating": {
-    "list": []
-  },
-  "time": {
-    "from": "now-6h",
-    "to": "now"
-  },
-  "timepicker": {},
-  "timezone": "Asia/Jakarta",
-  "title": "Eternal IoT — ESP32 Smart Lock NFC & Sensor (Homelab)",
-  "uid": "eternal-iot-main",
-  "version": 1
+  ]
 }

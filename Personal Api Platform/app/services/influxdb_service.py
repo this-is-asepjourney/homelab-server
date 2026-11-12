@@ -118,25 +118,28 @@ class InfluxDbService:
         device_serial: str = "ETL-ESP32-001",
         device_name: str = "Eternal",
         model: str = "Eternal-ESP32",
-        temperature: float = 0.0,
-        humidity: float = 0.0,
-        heat_index: float = 0.0,
-        rssi: int = -55,
-        is_locked: int = 1,
-        remaining_sec: int = 0,
-        uptime_sec: int = 0,
-        free_heap: int = 0,
+        temperature: Optional[float] = None,
+        humidity: Optional[float] = None,
+        heat_index: Optional[float] = None,
+        rssi: Optional[int] = None,
+        is_locked: Optional[int] = None,
+        remaining_sec: Optional[int] = None,
+        uptime_sec: Optional[int] = None,
+        free_heap: Optional[int] = None,
         extra_tags: Optional[Dict[str, str]] = None,
     ) -> bool:
         """
         Record a structured IoT Telemetry metric point into InfluxDB.
         Measurement: `iot_telemetry`
+
+        Only fields that are not None are written, so partial MQTT messages
+        (e.g. lock events without sensor data) never pollute the series with
+        fake zero / default values.
         """
         tags = {
             "device": self._sanitize_tag(device_name),
             "serial": self._sanitize_tag(device_serial),
             "model": self._sanitize_tag(model),
-            "lock_status": "LOCKED" if is_locked else "UNLOCKED",
         }
         if extra_tags:
             for k, v in extra_tags.items():
@@ -145,16 +148,25 @@ class InfluxDbService:
 
         tag_str = ",".join(f"{k}={v}" for k, v in sorted(tags.items()))
 
-        fields = [
-            f"temperature={float(temperature):.2f}",
-            f"humidity={float(humidity):.2f}",
-            f"heat_index={float(heat_index):.2f}",
-            f"rssi={int(rssi)}i",
-            f"is_locked={int(is_locked)}i",
-            f"remaining_sec={int(remaining_sec)}i",
-            f"uptime_sec={int(uptime_sec)}i",
-            f"free_heap={int(free_heap)}i",
-        ]
+        fields = []
+        if temperature is not None:
+            fields.append(f"temperature={float(temperature):.2f}")
+        if humidity is not None:
+            fields.append(f"humidity={float(humidity):.2f}")
+        if heat_index is not None:
+            fields.append(f"heat_index={float(heat_index):.2f}")
+        if rssi is not None:
+            fields.append(f"rssi={int(rssi)}i")
+        if is_locked is not None:
+            fields.append(f"is_locked={int(is_locked)}i")
+        if remaining_sec is not None:
+            fields.append(f"remaining_sec={int(remaining_sec)}i")
+        if uptime_sec is not None:
+            fields.append(f"uptime_sec={int(uptime_sec)}i")
+        if free_heap is not None:
+            fields.append(f"free_heap={int(free_heap)}i")
+        if not fields:
+            return True
         field_str = ",".join(fields)
         now_sec = int(datetime.now(timezone.utc).timestamp())
 
@@ -245,6 +257,42 @@ class InfluxDbService:
                 result["last_seen"] = time_val
 
         return result
+
+    @staticmethod
+    def parse_telemetry_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Extract telemetry fields from an ESP32 (Eternal) MQTT/JSON payload.
+        Missing fields are returned as None so nothing fake gets written.
+        """
+        def _num(*keys, cast=float):
+            for k in keys:
+                v = payload.get(k)
+                if v is not None and v != "":
+                    try:
+                        return cast(v)
+                    except (TypeError, ValueError):
+                        return None
+            return None
+
+        is_locked_val = payload.get("is_locked")
+        if is_locked_val is not None:
+            is_locked = 1 if is_locked_val in (1, True, "1", "true") else 0
+        elif payload.get("lock_status") is not None:
+            lock_str = str(payload.get("lock_status", "")).upper()
+            is_locked = 0 if ("UNLOCK" in lock_str or "OPEN" in lock_str) else 1
+        else:
+            is_locked = None
+
+        return {
+            "temperature": _num("suhu", "temperature", "temp"),
+            "humidity": _num("humidity", "hum", "kelembapan"),
+            "heat_index": _num("heat_index", "heatIndex"),
+            "rssi": _num("rssi", "wifi_rssi", cast=int),
+            "is_locked": is_locked,
+            "remaining_sec": _num("remaining_sec", cast=int),
+            "uptime_sec": _num("uptime_sec", "uptime", cast=int),
+            "free_heap": _num("free_heap", "heap", cast=int),
+        }
 
     @staticmethod
     def _sanitize_tag(val: str) -> str:

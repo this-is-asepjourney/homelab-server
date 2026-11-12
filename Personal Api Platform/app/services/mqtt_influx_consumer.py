@@ -181,8 +181,9 @@ class MqttInfluxConsumer:
         device_name = data.get("device") or data.get("nama") or "Eternal"
         model = data.get("model") or data.get("IOT_MODEL") or "Eternal-ESP32"
 
-        # 1. NFC RFID Tap Events
-        if "rfid" in topic.lower() or "uid" in data or data.get("event") == "nfc_tap":
+        # 1. NFC RFID Tap Events (hanya dari topik /Eternal/rfid; pesan "registered" = sinkron whitelist, bukan tap)
+        is_rfid_topic = topic.lower().rstrip("/").endswith("/rfid") or data.get("event") == "nfc_tap"
+        if is_rfid_topic and data.get("status") != "registered" and data.get("action") != "REGISTER_USER":
             uid = data.get("uid")
             if uid:
                 user_name = data.get("nama") or data.get("user") or "Tamu"
@@ -204,21 +205,8 @@ class MqttInfluxConsumer:
                 )
                 logger.info(f"[MQTT->InfluxDB] Recorded NFC event for {user_name} ({uid}) -> InfluxDB")
 
-                # Sync to MySQL nfc_access_logs and update nfc_users tap counter
-                try:
-                    from app.modules.iot.nfc_service import NfcService
-                    NfcService.record_tap({
-                        "uid": uid,
-                        "nama": user_name,
-                        "username": username,
-                        "role": role,
-                        "action_type": action,
-                        "lock_duration_sec": duration,
-                        "device_serial": str(device_serial),
-                        "device_ip": str(data.get("ip") or "192.168.25.104")
-                    })
-                except Exception as e:
-                    logger.debug(f"[MQTT->MySQL NFC Tap] Note: {e}")
+                # Catatan: log MySQL nfc_access_logs ditulis oleh ESP32 langsung via POST /api/nfc/access
+                # (NfcService.record_tap_event) sehingga tidak diduplikasi dari MQTT.
 
                 # Broadcast live event to Architecture Map
                 try:
@@ -239,28 +227,18 @@ class MqttInfluxConsumer:
                 except Exception:
                     pass
 
-        # 2. Temperature, Humidity & Telemetry Readings
-        suhu = data.get("suhu") or data.get("temperature") or data.get("temp")
-        hum = data.get("humidity") or data.get("hum") or data.get("kelembapan")
-        heat_idx = data.get("heat_index") or data.get("heatIndex") or 0.0
-        rssi = data.get("rssi") or data.get("wifi_rssi") or -55
-        is_locked_val = data.get("is_locked")
-        if is_locked_val is None:
-            lock_str = str(data.get("lock_status", "")).upper()
-            is_locked = 0 if "UNLOCK" in lock_str or "OPEN" in lock_str else 1
-        else:
-            is_locked = 1 if is_locked_val in (1, True, "1", "true") else 0
+        # 2. Temperature, Humidity & Telemetry Readings (hanya field yang ada di payload)
+        f = influx_service.parse_telemetry_payload(data)
+        temp_val, hum_val, heat_val = f["temperature"], f["humidity"], f["heat_index"]
+        rssi_val, is_locked = f["rssi"], f["is_locked"]
+        rem_sec, uptime, heap = f["remaining_sec"], f["uptime_sec"], f["free_heap"]
 
-        rem_sec = int(data.get("remaining_sec") or 0)
-        uptime = int(data.get("uptime_sec") or data.get("uptime") or 0)
-        heap = int(data.get("free_heap") or data.get("heap") or 0)
+        # Heat index diturunkan dari suhu bila firmware belum mengirimnya
+        if heat_val is None and temp_val is not None and temp_val > 0:
+            heat_val = temp_val
 
-        # If temperature or humidity exists, store telemetry point
-        if suhu is not None or hum is not None or "is_locked" in data or "lock_status" in data:
-            temp_val = float(suhu) if suhu is not None else 0.0
-            hum_val = float(hum) if hum is not None else 0.0
-            heat_val = float(heat_idx) if heat_idx else (temp_val if temp_val > 0 else 0.0)
-
+        has_data = any(v is not None for v in f.values())
+        if has_data:
             extra_tags = {}
             if "ip" in data:
                 extra_tags["ip"] = str(data["ip"])
@@ -274,7 +252,7 @@ class MqttInfluxConsumer:
                 temperature=temp_val,
                 humidity=hum_val,
                 heat_index=heat_val,
-                rssi=int(rssi),
+                rssi=rssi_val,
                 is_locked=is_locked,
                 remaining_sec=rem_sec,
                 uptime_sec=uptime,
@@ -291,9 +269,13 @@ class MqttInfluxConsumer:
                 temp=temp_val,
                 hum=hum_val,
                 heat_idx=heat_val,
-                rssi=int(rssi),
+                rssi=rssi_val,
                 is_locked=is_locked,
                 rem_sec=rem_sec,
+                ip=data.get("ip"),
+                mac=data.get("mac"),
+                ssid=data.get("ap") or data.get("ssid"),
+                firmware=data.get("VER"),
             )
 
             # Broadcast live telemetry stream to Architecture Map
@@ -319,50 +301,70 @@ class MqttInfluxConsumer:
         self,
         device_serial: str,
         device_name: str,
-        temp: float,
-        hum: float,
-        heat_idx: float,
-        rssi: int,
-        is_locked: int,
-        rem_sec: int,
+        temp=None,
+        hum=None,
+        heat_idx=None,
+        rssi=None,
+        is_locked=None,
+        rem_sec=None,
+        ip=None,
+        mac=None,
+        ssid=None,
+        firmware=None,
     ):
-        """Keep MySQL eternal_db snapshot & logs in sync with incoming MQTT telemetry."""
+        """Keep MySQL eternal_db snapshot & logs in sync (hanya kolom yang datanya ada di payload)."""
         try:
             from app.modules.iot.nfc_service import get_eternal_mysql_conn
             conn = get_eternal_mysql_conn()
             try:
                 with conn.cursor() as cur:
-                    # 1. Update latest snapshot in iot_devices
-                    cur.execute("""
-                        INSERT INTO iot_devices (device_serial, device_name, model, temperature_c, humidity_pct, heat_index_c, wifi_rssi, rssi, status, last_seen_at)
-                        VALUES (%s, %s, 'Eternal-ESP32', %s, %s, %s, %s, %s, 'online', NOW())
-                        ON DUPLICATE KEY UPDATE
-                            temperature_c = VALUES(temperature_c),
-                            humidity_pct = VALUES(humidity_pct),
-                            heat_index_c = VALUES(heat_index_c),
-                            wifi_rssi = VALUES(wifi_rssi),
-                            rssi = VALUES(rssi),
-                            status = 'online',
-                            last_seen_at = NOW();
-                    """, (device_serial, device_name, temp, hum, heat_idx, rssi, rssi))
+                    # 1. Update latest snapshot in iot_devices (kolom dinamis, tanpa menimpa dengan nilai palsu)
+                    cols = {"device_name": device_name}
+                    if temp is not None:
+                        cols["temperature_c"] = temp
+                    if hum is not None:
+                        cols["humidity_pct"] = hum
+                    if heat_idx is not None:
+                        cols["heat_index_c"] = heat_idx
+                    if rssi is not None:
+                        cols["wifi_rssi"] = rssi
+                        cols["rssi"] = rssi
+                    if ip:
+                        cols["ip_address"] = str(ip)
+                    if mac:
+                        cols["mac_address"] = str(mac)
+                    if ssid:
+                        cols["ssid"] = str(ssid)
+                    if firmware:
+                        cols["firmware_version"] = str(firmware)
 
-                    # 2. Append time-series point to iot_telemetry_logs
-                    if temp > 0 or hum > 0:
+                    names = ["device_serial", "model", "status", "last_seen_at"] + list(cols.keys())
+                    placeholders = ["%s", "'Eternal-ESP32'", "'online'", "NOW()"] + ["%s"] * len(cols)
+                    updates = ["status = 'online'", "last_seen_at = NOW()"] + [f"{k} = VALUES({k})" for k in cols]
+                    cur.execute(
+                        f"INSERT INTO iot_devices ({', '.join(names)}) VALUES ({', '.join(placeholders)}) "
+                        f"ON DUPLICATE KEY UPDATE {', '.join(updates)};",
+                        [device_serial] + list(cols.values()),
+                    )
+
+                    # 2. Append time-series point to iot_telemetry_logs (hanya bila ada pembacaan sensor)
+                    if temp is not None and hum is not None and (temp > 0 or hum > 0):
                         cur.execute("""
                             INSERT INTO iot_telemetry_logs (device_serial, temperature_c, humidity_pct, heat_index_c, wifi_rssi, recorded_at)
                             VALUES (%s, %s, %s, %s, %s, NOW());
-                        """, (device_serial, temp, hum, heat_idx, rssi))
+                        """, (device_serial, temp, hum, heat_idx if heat_idx is not None else temp, rssi or 0))
 
-                    # 3. Update device_locks if remaining_sec or lock state is present
-                    lock_str = "LOCKED" if is_locked == 1 else "UNLOCKED"
-                    cur.execute("""
-                        UPDATE device_locks
-                        SET is_locked = %s,
-                            lock_status = %s,
-                            unlock_duration_sec = %s,
-                            updated_at = NOW()
-                        WHERE device_serial = %s;
-                    """, (is_locked, lock_str, rem_sec, device_serial))
+                    # 3. Update device_locks hanya jika status kunci ada di payload
+                    if is_locked is not None:
+                        lock_str = "LOCKED" if is_locked == 1 else "UNLOCKED"
+                        cur.execute("""
+                            UPDATE device_locks
+                            SET is_locked = %s,
+                                lock_status = %s,
+                                unlock_duration_sec = COALESCE(%s, unlock_duration_sec),
+                                updated_at = NOW()
+                            WHERE device_serial = %s;
+                        """, (is_locked, lock_str, rem_sec, device_serial))
             finally:
                 conn.close()
         except Exception as e:

@@ -304,10 +304,22 @@ class NfcService:
         nama = payload.get("nama") or (user["nama"] if user else "Tamu / Belum Terdaftar")
         username = payload.get("username") or (user["username"] if user else f"nfc_{raw_uid[-4:].lower()}")
         role = payload.get("role") or (user["role"] if user else "GUEST")
-        action = payload.get("action_type") or payload.get("action") or "TAP_ON"
+        # Firmware Eternal mengirim nama aksi pada key "event" (NFC_TAP_ON_UNLOCK, NFC_TAP_OFF_LOCK,
+        # NFC_DENIED, AUTO_LOCK_2H, MQTT_REMOTE_*, ...). Jangan jatuh ke default "TAP_ON" jika ada.
+        action = str(
+            payload.get("action_type") or payload.get("action") or payload.get("event") or "TAP_ON"
+        )
+        action_up = action.upper()
         device_serial = payload.get("device_serial", "ETL-ESP32-001")
-        device_ip = payload.get("device_ip", "0.0.0.0")
-        lock_sec = int(payload.get("lock_duration_sec", 7200))
+        device_ip = payload.get("device_ip") or payload.get("ip") or "0.0.0.0"
+        if payload.get("lock_duration_sec") is not None:
+            lock_sec = int(payload["lock_duration_sec"])
+        elif payload.get("remaining_sec") is not None:
+            lock_sec = int(payload["remaining_sec"])
+        else:
+            lock_sec = 7200
+        is_denied = "DENIED" in action_up
+        is_unlocking = "UNLOCK" in action_up or action_up.endswith("_ON") or action_up == "TAP_ON"
 
         conn = get_eternal_mysql_conn()
         try:
@@ -328,36 +340,36 @@ class NfcService:
                         WHERE UPPER(uid) = %s;
                     """, (raw_uid,))
 
-                # 3. Update device lock status (Toggle ON/OFF)
-                is_unlocking = "ON" in action.upper() or "UNLOCK" in action.upper()
-                cur.execute("""
-                    INSERT INTO device_locks 
-                        (device_serial, is_locked, lock_status, unlocked_by_uid, unlocked_by_name,
-                         unlocked_by_username, unlocked_by_role, unlock_duration_sec, unlock_expires_at, last_toggle_action)
-                    VALUES 
-                        (%s, %s, %s, %s, %s, %s, %s, %s, DATE_ADD(NOW(), INTERVAL %s SECOND), %s)
-                    ON DUPLICATE KEY UPDATE
-                        is_locked = VALUES(is_locked),
-                        lock_status = VALUES(lock_status),
-                        unlocked_by_uid = VALUES(unlocked_by_uid),
-                        unlocked_by_name = VALUES(unlocked_by_name),
-                        unlocked_by_username = VALUES(unlocked_by_username),
-                        unlocked_by_role = VALUES(unlocked_by_role),
-                        unlock_duration_sec = VALUES(unlock_duration_sec),
-                        unlock_expires_at = VALUES(unlock_expires_at),
-                        last_toggle_action = VALUES(last_toggle_action);
-                """, (
-                    device_serial,
-                    0 if is_unlocking else 1,
-                    "UNLOCKED" if is_unlocking else "LOCKED",
-                    raw_uid,
-                    nama,
-                    username,
-                    role,
-                    lock_sec,
-                    lock_sec if is_unlocking else 0,
-                    action,
-                ))
+                # 3. Update device lock status (Toggle ON/OFF) — penolakan kartu TIDAK mengubah status kunci
+                if not is_denied:
+                    cur.execute("""
+                        INSERT INTO device_locks 
+                            (device_serial, is_locked, lock_status, unlocked_by_uid, unlocked_by_name,
+                             unlocked_by_username, unlocked_by_role, unlock_duration_sec, unlock_expires_at, last_toggle_action)
+                        VALUES 
+                            (%s, %s, %s, %s, %s, %s, %s, %s, DATE_ADD(NOW(), INTERVAL %s SECOND), %s)
+                        ON DUPLICATE KEY UPDATE
+                            is_locked = VALUES(is_locked),
+                            lock_status = VALUES(lock_status),
+                            unlocked_by_uid = VALUES(unlocked_by_uid),
+                            unlocked_by_name = VALUES(unlocked_by_name),
+                            unlocked_by_username = VALUES(unlocked_by_username),
+                            unlocked_by_role = VALUES(unlocked_by_role),
+                            unlock_duration_sec = VALUES(unlock_duration_sec),
+                            unlock_expires_at = VALUES(unlock_expires_at),
+                            last_toggle_action = VALUES(last_toggle_action);
+                    """, (
+                        device_serial,
+                        0 if is_unlocking else 1,
+                        "UNLOCKED" if is_unlocking else "LOCKED",
+                        raw_uid,
+                        nama,
+                        username,
+                        role,
+                        lock_sec,
+                        lock_sec if is_unlocking else 0,
+                        action,
+                    ))
 
             # Auto-record NFC event to InfluxDB time-series database
             try:
@@ -370,7 +382,7 @@ class NfcService:
                     action=action,
                     device_serial=device_serial,
                     duration_sec=lock_sec,
-                    status="granted" if user else "denied"
+                    status="denied" if is_denied else "granted"
                 )
             except Exception:
                 pass

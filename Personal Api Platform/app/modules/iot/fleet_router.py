@@ -858,21 +858,9 @@ async def ingest_iot_telemetry_influx(request: Request):
 
     serial = payload.get("serial") or payload.get("device_serial") or payload.get("MCID") or "ETL-ESP32-001"
     name = payload.get("device") or payload.get("nama") or "Eternal"
-    temp = float(payload.get("suhu") or payload.get("temperature") or payload.get("temp") or 0.0)
-    hum = float(payload.get("humidity") or payload.get("hum") or 0.0)
-    heat_idx = float(payload.get("heat_index") or payload.get("heatIndex") or temp)
-    rssi = int(payload.get("rssi") or payload.get("wifi_rssi") or -55)
-    
-    is_locked_val = payload.get("is_locked")
-    if is_locked_val is None:
-        lock_str = str(payload.get("lock_status", "")).upper()
-        is_locked = 0 if "UNLOCK" in lock_str or "OPEN" in lock_str else 1
-    else:
-        is_locked = 1 if is_locked_val in (1, True, "1", "true") else 0
-
-    rem_sec = int(payload.get("remaining_sec") or 0)
-    uptime = int(payload.get("uptime_sec") or payload.get("uptime") or 0)
-    heap = int(payload.get("free_heap") or payload.get("heap") or 0)
+    f = influx_service.parse_telemetry_payload(payload)
+    temp, hum, heat_idx, rssi = f["temperature"], f["humidity"], f["heat_index"], f["rssi"]
+    is_locked, rem_sec, uptime, heap = f["is_locked"], f["remaining_sec"], f["uptime_sec"], f["free_heap"]
 
     extra_tags = {}
     if "ip" in payload:
