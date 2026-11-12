@@ -589,6 +589,7 @@ def cmd_init_dockerfile(args):
     psm_root = Path(__file__).resolve().parent / "Personal_Server_Manager"
     if str(psm_root) not in sys.path:
         sys.path.insert(0, str(psm_root))
+    # pyrefly: ignore[missing-import]
     from apps.agent.app.deployment.dockerfile_generator import (
         detect_project_stack,
         generate_dockerfile,
