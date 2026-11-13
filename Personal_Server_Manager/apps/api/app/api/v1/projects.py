@@ -31,6 +31,7 @@ from apps.api.app.schemas.all_schemas import (
 from apps.api.app.services.audit_service import log_activity
 from apps.api.app.services.pap_client import sync_psm_to_pap
 from apps.api.app.services.job_service import create_and_dispatch_job
+from apps.api.app.services.github_service import get_stored_token
 from apps.api.app.services.db_provision_service import (
     provision_and_sync_project_db,
     resolve_project_db_name,
@@ -304,6 +305,7 @@ async def create_project(
                 "db_type": project.db_type,
                 "environment_variables": full_env,
                 "database_config": db_info,
+                "git_token": get_stored_token(),
             }
 
             await create_and_dispatch_job(
@@ -466,6 +468,7 @@ async def execute_project_redeploy(
             "db_type": project.db_type,
             "environment_variables": full_env,
             "database_config": db_info,
+            "git_token": get_stored_token(),
         }
     elif src and src.upload_object_key and os.path.exists(src.upload_object_key):
         job_type = "deployment.zip"
@@ -483,6 +486,7 @@ async def execute_project_redeploy(
             "db_type": project.db_type,
             "environment_variables": full_env,
             "database_config": db_info,
+            "git_token": get_stored_token(),
         }
     else:
         raise HTTPException(

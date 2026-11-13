@@ -30,6 +30,7 @@ import {
   Eye,
   Sparkles,
   Save,
+  AlertCircle,
 } from 'lucide-react';
 import { api, formatBytes } from '../../../lib/api';
 import { DeployProjectModal } from '../../../components/deploy-project-modal';
@@ -60,6 +61,8 @@ export default function ProjectDetailPage() {
   const [customDbName, setCustomDbName] = useState('');
   const [selectedDbType, setSelectedDbType] = useState<string>('postgres');
   const [copiedWebhook, setCopiedWebhook] = useState(false);
+  const [autoInstallingWebhook, setAutoInstallingWebhook] = useState(false);
+  const [webhookInstallMsg, setWebhookInstallMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [copiedDbUrl, setCopiedDbUrl] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
@@ -324,6 +327,39 @@ export default function ProjectDetailPage() {
       router.push(`/deployments/${dep.id}`);
     } catch (err: any) {
       alert(err.message || 'Rollback failed');
+    }
+  };
+
+  const handleAutoInstallWebhook = async () => {
+    const repoUrl = project?.source?.repository_url || '';
+    if (!repoUrl || !repoUrl.includes('github.com')) {
+      alert('Project ini belum memiliki URL GitHub yang valid.');
+      return;
+    }
+    const clean = repoUrl.replace(/\.git$/, '').replace(/\/$/, '');
+    const parts = clean.split('github.com/')[1] || clean.split('github.com:')[1];
+    if (!parts) {
+      alert('Format URL GitHub tidak dikenali.');
+      return;
+    }
+    const [owner, repo] = parts.split('/');
+    if (!owner || !repo) {
+      alert('Format owner/repo tidak valid.');
+      return;
+    }
+
+    try {
+      setAutoInstallingWebhook(true);
+      setWebhookInstallMsg(null);
+      const payloadUrl = typeof window !== 'undefined'
+        ? `${window.location.origin}/api/v1/deployments/webhook/${projectId}`
+        : `/api/v1/deployments/webhook/${projectId}`;
+      const res = await api.setupGitHubWebhook(owner, repo, payloadUrl);
+      setWebhookInstallMsg({ type: 'success', text: res.message || 'Webhook berhasil dipasang ke repositori GitHub Anda!' });
+    } catch (err: any) {
+      setWebhookInstallMsg({ type: 'error', text: err.message || 'Gagal memasang webhook otomatis ke GitHub.' });
+    } finally {
+      setAutoInstallingWebhook(false);
     }
   };
 
@@ -1298,17 +1334,47 @@ export default function ProjectDetailPage() {
 
           {/* GitHub Auto-Deploy Webhook Card */}
           <div className="rounded-xl border border-border bg-card p-5 space-y-4">
-            <div className="flex items-center gap-2">
-              <div className="p-2 rounded-lg bg-purple-500/10 text-purple-500">
-                <GitBranch className="w-4 h-4" />
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-lg bg-purple-500/10 text-purple-500">
+                  <GitBranch className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-foreground">GitHub Webhook (Continuous Deployment to Docker)</h3>
+                  <p className="text-xs text-gray-500">
+                    Automatically build and deploy directly to Docker every time you push code to GitHub.
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="font-bold text-sm text-foreground">GitHub Webhook (Continuous Deployment to Docker)</h3>
-                <p className="text-xs text-gray-500">
-                  Automatically build and deploy directly to Docker every time you push code to GitHub.
-                </p>
-              </div>
+
+              {project?.source?.repository_url && project.source.repository_url.includes('github.com') && (
+                <button
+                  onClick={handleAutoInstallWebhook}
+                  disabled={autoInstallingWebhook}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium transition-colors shadow-sm disabled:opacity-50 self-start"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>{autoInstallingWebhook ? 'Memasang...' : '⚡ Pasang Webhook Otomatis ke GitHub'}</span>
+                </button>
+              )}
             </div>
+
+            {webhookInstallMsg && (
+              <div
+                className={`p-3 rounded-lg text-xs flex items-center gap-2 animate-in fade-in duration-200 ${
+                  webhookInstallMsg.type === 'success'
+                    ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                    : 'bg-rose-500/10 border border-rose-500/20 text-rose-400'
+                }`}
+              >
+                {webhookInstallMsg.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                )}
+                <span>{webhookInstallMsg.text}</span>
+              </div>
+            )}
 
             <div className="space-y-2 text-xs">
               <label className="block text-gray-400 font-medium">Payload URL to configure in GitHub:</label>

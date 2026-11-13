@@ -12,6 +12,7 @@ from apps.api.app.api.v1.backups import router as backups_router
 from apps.api.app.api.v1.templates import router as templates_router
 from apps.api.app.api.v1.notifications import router as notifications_router
 from apps.api.app.api.v1.pap_integration import router as pap_router
+from apps.api.app.api.v1.github import router as github_router
 
 api_router = APIRouter()
 
@@ -28,3 +29,4 @@ api_router.include_router(backups_router)
 api_router.include_router(templates_router)
 api_router.include_router(notifications_router)
 api_router.include_router(pap_router)
+api_router.include_router(github_router)

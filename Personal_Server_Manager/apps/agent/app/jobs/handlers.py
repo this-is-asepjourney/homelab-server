@@ -76,12 +76,15 @@ def handle_deployment_git(payload: Dict[str, Any], log_cb: Callable) -> Dict[str
     image_tag = payload.get("image_tag", f"{project_name}:latest")
     env_vars = payload.get("environment_variables", {})
     db_config = payload.get("database_config", {})
+    git_token = payload.get("git_token")
 
     target_dir = os.path.join(agent_settings.WORKSPACE_DIR, project_id)
     log_cb("info", f"[STAGE:1/5] Mempersiapkan Source Code: Mengambil repository Git {repo_url} (branch: {branch})...")
 
     # 1. Clone or pull repository
-    cloned = DeploymentEngine.clone_or_pull_git(repo_url, branch, target_dir, log_cb, commit_hash=commit_hash)
+    cloned = DeploymentEngine.clone_or_pull_git(
+        repo_url, branch, target_dir, log_cb, commit_hash=commit_hash, git_token=git_token
+    )
     if not cloned:
         log_cb("error", "[STAGE:FAILED] Gagal melakukan clone atau fetch repository Git.")
         raise RuntimeError("Gagal clone atau pull git repository")

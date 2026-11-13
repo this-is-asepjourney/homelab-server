@@ -29,6 +29,7 @@ from apps.api.app.schemas.all_schemas import (
 from apps.api.app.services.audit_service import log_activity
 from apps.api.app.services.job_service import create_and_dispatch_job
 from apps.api.app.services.db_provision_service import provision_and_sync_project_db
+from apps.api.app.services.github_service import get_stored_token
 
 router = APIRouter(prefix="/deployments", tags=["Deployment Center"])
 
@@ -166,6 +167,7 @@ async def create_git_deployment(
         "db_type": project.db_type,
         "environment_variables": env_vars,
         "database_config": db_info,
+        "git_token": get_stored_token(),
     }
 
     job = await create_and_dispatch_job(
@@ -349,6 +351,7 @@ async def finalize_zip_upload(
         "db_type": project.db_type,
         "environment_variables": env_vars,
         "database_config": db_info,
+        "git_token": get_stored_token(),
     }
 
     job = await create_and_dispatch_job(
@@ -463,6 +466,7 @@ async def github_webhook_trigger(
         "db_type": project.db_type,
         "environment_variables": env_vars,
         "database_config": db_info,
+        "git_token": get_stored_token(),
     }
 
     job = await create_and_dispatch_job(

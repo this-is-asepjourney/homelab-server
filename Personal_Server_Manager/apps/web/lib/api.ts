@@ -685,4 +685,57 @@ export const api = {
     const res = await fetchWithAuth(`/api/v1/backups/${encodeURIComponent(filename)}/verify`, { method: 'POST' });
     return res.ok ? res.json() : null;
   },
+
+  // GitHub Full Access Integration
+  async getGitHubStatus() {
+    const res = await fetchWithAuth('/api/v1/github/status');
+    return res.ok ? res.json() : { connected: false };
+  },
+
+  async connectGitHub(token: string) {
+    const res = await fetchWithAuth('/api/v1/github/connect', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Gagal menghubungkan akun GitHub');
+    }
+    return res.json();
+  },
+
+  async disconnectGitHub() {
+    const res = await fetchWithAuth('/api/v1/github/disconnect', { method: 'POST' });
+    return res.json();
+  },
+
+  async getGitHubRepos() {
+    const res = await fetchWithAuth('/api/v1/github/repos');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Gagal mengambil repositori GitHub');
+    }
+    return res.json();
+  },
+
+  async getGitHubBranches(owner: string, repo: string) {
+    const res = await fetchWithAuth(`/api/v1/github/repos/${owner}/${repo}/branches`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Gagal mengambil branches GitHub');
+    }
+    return res.json();
+  },
+
+  async setupGitHubWebhook(owner: string, repo: string, webhookUrl: string, secret?: string) {
+    const res = await fetchWithAuth('/api/v1/github/repos/webhook', {
+      method: 'POST',
+      body: JSON.stringify({ owner, repo, webhook_url: webhookUrl, secret }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Gagal memasang webhook ke GitHub');
+    }
+    return res.json();
+  },
 };

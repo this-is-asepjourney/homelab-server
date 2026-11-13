@@ -704,18 +704,28 @@ class DeploymentEngine:
         branch: str,
         target_dir: str,
         log_callback: Callable[[str, str], None],
-        commit_hash: Optional[str] = None
+        commit_hash: Optional[str] = None,
+        git_token: Optional[str] = None
     ) -> bool:
-        """Clone or pull git repository with clean workspace reset."""
+        """Clone or pull git repository with clean workspace reset and private repo token support."""
         os.makedirs(target_dir, exist_ok=True)
         git_dir = os.path.join(target_dir, ".git")
+
+        # Fallback to GITHUB_TOKEN environment variable if not passed in payload
+        active_token = git_token or os.getenv("GITHUB_TOKEN")
+
+        def safe_log(level: str, msg: str):
+            if active_token:
+                msg = msg.replace(active_token, "***")
+            msg = re.sub(r"https?://[^@]+@github\.com", "https://***@github.com", msg)
+            log_callback(level, msg)
 
         # Auto-normalize GitHub / GitLab branch URLs (e.g. https://github.com/owner/repo/tree/branch_name)
         if repo_url and "/tree/" in repo_url:
             parts = repo_url.split("/tree/", 1)
             clean_base = parts[0].rstrip("/")
             extracted_branch = parts[1].strip("/").split("/")[0]
-            log_callback("info", f"[Git] Normalisasi URL browser Git: '{repo_url}' -> base: '{clean_base}', branch: '{extracted_branch}'")
+            safe_log("info", f"[Git] Normalisasi URL browser Git: '{repo_url}' -> base: '{clean_base}', branch: '{extracted_branch}'")
             repo_url = clean_base
             if not repo_url.endswith(".git") and "github.com" in repo_url:
                 repo_url += ".git"
@@ -724,29 +734,40 @@ class DeploymentEngine:
         elif repo_url and not repo_url.endswith(".git") and "github.com" in repo_url:
             repo_url = repo_url.rstrip("/") + ".git"
 
+        # Inject token into GitHub URL for authenticated private repo access
+        auth_url = repo_url
+        if active_token and "github.com" in repo_url and "@" not in repo_url:
+            if repo_url.startswith("https://github.com/"):
+                auth_url = repo_url.replace("https://github.com/", f"https://x-access-token:{active_token}@github.com/")
+            elif repo_url.startswith("http://github.com/"):
+                auth_url = repo_url.replace("http://github.com/", f"https://x-access-token:{active_token}@github.com/")
+
+        display_url = re.sub(r"https?://[^@]+@github\.com", "https://github.com", repo_url)
+
         if os.path.exists(git_dir):
-            log_callback("info", f"[Git] Fetching latest changes from branch '{branch}'...")
+            safe_log("info", f"[Git] Fetching latest changes from branch '{branch}'...")
+            subprocess.run(["git", "-C", target_dir, "remote", "set-url", "origin", auth_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             subprocess.run(["git", "-C", target_dir, "fetch", "origin", branch], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             cmd = ["git", "-C", target_dir, "reset", "--hard", f"origin/{branch}"]
         else:
             if os.path.exists(target_dir) and os.listdir(target_dir):
                 shutil.rmtree(target_dir, ignore_errors=True)
                 os.makedirs(target_dir, exist_ok=True)
-            log_callback("info", f"[Git] Cloning repository {repo_url} (branch: {branch})...")
-            cmd = ["git", "clone", "--depth", "1", "--branch", branch, repo_url, target_dir]
+            safe_log("info", f"[Git] Cloning repository {display_url} (branch: {branch})...")
+            cmd = ["git", "clone", "--depth", "1", "--branch", branch, auth_url, target_dir]
 
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         for line in proc.stdout:
             clean = line.strip()
             if clean:
-                log_callback("info", clean)
+                safe_log("info", clean)
         proc.wait()
 
         if proc.returncode != 0:
             return False
 
         if commit_hash and commit_hash != "HEAD":
-            log_callback("info", f"[Git] Checking out commit {commit_hash}...")
+            safe_log("info", f"[Git] Checking out commit {commit_hash}...")
             c_proc = subprocess.run(
                 ["git", "-C", target_dir, "checkout", commit_hash],
                 stdout=subprocess.PIPE,
@@ -755,7 +776,7 @@ class DeploymentEngine:
             )
             for line in c_proc.stdout.strip().split("\n"):
                 if line.strip():
-                    log_callback("info", line.strip())
+                    safe_log("info", line.strip())
 
         return True
 
