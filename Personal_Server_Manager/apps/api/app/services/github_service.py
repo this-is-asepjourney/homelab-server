@@ -189,3 +189,4 @@ def inject_auth_into_git_url(repo_url: str, token: Optional[str] = None) -> str:
         return clean_url.replace("http://github.com/", f"https://x-access-token:{tok}@github.com/")
 
     return repo_url
+
