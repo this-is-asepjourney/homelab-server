@@ -12,6 +12,7 @@ from apps.api.app.core.security import encrypt_secret, decrypt_secret
 from apps.api.app.core.dependencies import get_current_user, require_role
 from apps.api.app.models.entities import (
     Project,
+    ProjectSource,
     EnvironmentVariable,
     Deployment,
     DeploymentLog,
