@@ -87,6 +87,8 @@ def handle_deployment_git(payload: Dict[str, Any], log_cb: Callable) -> Dict[str
     )
     if not cloned:
         log_cb("error", "[STAGE:FAILED] Gagal melakukan clone atau fetch repository Git.")
+        log_cb("error", f"[DIAGNOSTIC] Sebab Kemungkinan: Branch '{branch}' tidak ditemukan pada upstream origin, atau repository privat membutuhkan GitHub Personal Access Token.")
+        log_cb("error", f"[DIAGNOSTIC] Cara Cek di Server Ubuntu: docker logs --tail 50 psm-agent  ATAU  git ls-remote --heads {repo_url}")
         raise RuntimeError("Gagal clone atau pull git repository")
 
     # 2. Ensure project database exists & auto-connect environment secrets
@@ -133,6 +135,8 @@ def handle_deployment_git(payload: Dict[str, Any], log_cb: Callable) -> Dict[str
 
     if not deployed:
         log_cb("error", f"[STAGE:FAILED] Proses build image atau peluncuran container '{project_name}' gagal.")
+        log_cb("error", f"[DIAGNOSTIC] Sebab Kemungkinan: Kesalahan eksekusi Dockerfile (npm install/composer/extensions) atau port bentrok.")
+        log_cb("error", f"[DIAGNOSTIC] Cara Cek di Server Ubuntu: docker logs --tail 50 psm-agent  ATAU  cd /opt/psm/workspaces/{project_id} && docker build -t test .")
         raise RuntimeError("Proses build atau peluncuran container gagal. Lihat log deployment.")
 
     log_cb("info", f"[STAGE:5/5] Meluncurkan Container & Healthcheck: Container '{project_name}' aktif di jaringan.")

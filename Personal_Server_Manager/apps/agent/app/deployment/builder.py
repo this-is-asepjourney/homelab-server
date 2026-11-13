@@ -1173,6 +1173,8 @@ class DeploymentEngine:
                 build_proc.wait()
                 if build_proc.returncode != 0:
                     log_callback("error", f"[Docker-CLI] Build failed with exit code {build_proc.returncode}")
+                    log_callback("error", f"[DIAGNOSTIC] Docker build gagal pada salah satu layer Dockerfile di atas. Periksa pesan error merah sebelum baris ini.")
+                    log_callback("error", f"[DIAGNOSTIC] Cara Cek Manual di Server Ubuntu: cd {workspace_dir} && docker build --progress=plain -t {sanitized_tag} .")
                     return False
             except Exception as e:
                 log_callback("error", f"[Docker-CLI] Build execution error: {e}")
@@ -1214,6 +1216,8 @@ class DeploymentEngine:
                 run_proc.wait()
                 if run_proc.returncode != 0:
                     log_callback("error", f"[Docker-CLI] Container launch failed with exit code {run_proc.returncode}")
+                    log_callback("error", f"[DIAGNOSTIC] Container gagal berjalan. Kemungkinan port host bentrok atau parameter invalid.")
+                    log_callback("error", f"[DIAGNOSTIC] Cara Cek di Server Ubuntu: docker ps -a --filter name={sanitized_name} && docker logs --tail 30 {sanitized_name}")
                     return False
 
                 log_callback("info", f"[Docker-CLI] Container '{sanitized_name}' is now running successfully!")

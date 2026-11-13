@@ -331,6 +331,101 @@ export default function DeploymentDetailPage() {
     return null;
   }, [project, deployment]);
 
+  // Automated Root Cause & Failure Diagnosis
+  const failureDiagnosis = useMemo<{
+    title: string;
+    reason: string;
+    solution: string;
+    serverCheckCmd?: string;
+  } | null>(() => {
+    if (deployment?.status !== 'failed' && deployment?.status !== 'cancelled') return null;
+
+    const errorLogs = logs.filter((l) => l.level === 'error').map((l) => l.message);
+    const allLogText = logs.map((l) => l.message).join('\n');
+    const projectId = deployment?.project_id || project?.id || '<project-id>';
+    const projectName = (deployment?.project_name || project?.name || 'app').toLowerCase().replace(/[^a-zA-Z0-9_.-]/g, '-');
+
+    // 1. Git branch error
+    if (allLogText.includes('Could not find remote branch') || (allLogText.includes('Remote branch') && allLogText.includes('not found'))) {
+      const branch = project?.source?.branch || 'main';
+      const repoUrl = project?.source?.repository_url || '<repo-url>';
+      return {
+        title: 'Branch Git Tidak Ditemukan',
+        reason: `Branch '${branch}' tidak ada pada repository remote GitHub (${repoUrl}).`,
+        solution: 'Periksa nama branch di GitHub (perhatikan huruf besar/kecil, misalnya "main" vs "Main"). Klik tombol "Edit & Deploy Ulang" untuk mengganti nama branch target.',
+        serverCheckCmd: `git ls-remote --heads ${repoUrl}`,
+      };
+    }
+
+    // 2. Git authentication error
+    if (
+      allLogText.includes('Authentication failed') ||
+      allLogText.includes('could not read Username') ||
+      allLogText.includes('Permission to') ||
+      allLogText.includes('terminal prompts disabled')
+    ) {
+      return {
+        title: 'Akses Git / Token GitHub Diperlukan',
+        reason: 'Repository ini bersifat privat atau membutuhkan autentikasi Personal Access Token (PAT).',
+        solution: 'Masukkan GitHub Personal Access Token (PAT) Anda melalui menu "Edit & Deploy Ulang" agar server dapat melakukan git clone secara otomatis.',
+        serverCheckCmd: 'docker logs --tail 40 psm-agent',
+      };
+    }
+
+    // 3. Docker build failure
+    if (
+      allLogText.includes('Build failed with exit code') ||
+      allLogText.includes('failed to solve with frontend') ||
+      allLogText.includes('executor failed running') ||
+      allLogText.includes('returned a non-zero code')
+    ) {
+      return {
+        title: 'Kompilasi Dockerfile Gagal',
+        reason: 'Docker menemui kegagalan saat menjalankan instruksi build (misal RUN npm install, composer install, atau extension PHP).',
+        solution: 'Tinjau baris merah pada Terminal Log di bawah untuk melihat baris RUN yang gagal. Anda juga dapat memeriksa file di workspace server.',
+        serverCheckCmd: `docker logs --tail 60 psm-agent`,
+      };
+    }
+
+    // 4. Port collision
+    if (
+      allLogText.includes('port is already allocated') ||
+      allLogText.includes('address already in use') ||
+      allLogText.includes('Port bentrok')
+    ) {
+      const ports = deployment?.port_mappings || project?.port_mappings || '3000:3000';
+      return {
+        title: 'Port Host Bentrok (Port Already in Use)',
+        reason: `Port host (${ports}) sedang digunakan oleh container atau service lain di server Ubuntu.`,
+        solution: 'Ubah host port (misalnya ganti 3102:80 menjadi 3105:80) via tombol "Edit & Deploy Ulang" di samping.',
+        serverCheckCmd: `docker ps --format "table {{.Names}}\t{{.Ports}}"`,
+      };
+    }
+
+    // 5. Interrupted due to agent/server restart
+    if (
+      allLogText.includes('direstart') ||
+      allLogText.includes('terhenti karena server/agen') ||
+      deployment?.status === 'cancelled'
+    ) {
+      return {
+        title: 'Deployment Terhenti karena Server/Agen Restart',
+        reason: 'Kontainer psm-agent atau host server sempat direstart saat proses build sedang berjalan.',
+        solution: 'Klik tombol "Deploy Ulang" di kanan. Proses akan dijalankan kembali dari awal secara bersih.',
+        serverCheckCmd: 'docker ps --filter name=psm-agent',
+      };
+    }
+
+    // Fallback: extract last error log
+    const lastErrorMsg = errorLogs[errorLogs.length - 1] || 'Terjadi kesalahan sistem saat proses deployment.';
+    return {
+      title: 'Deployment Gagal',
+      reason: lastErrorMsg,
+      solution: 'Tinjau baris-baris error merah pada Terminal Log di bawah untuk melihat rincian masalah, atau coba klik tombol "Deploy Ulang".',
+      serverCheckCmd: `docker logs --tail 50 psm-agent`,
+    };
+  }, [deployment, logs, project]);
+
   return (
     <div className="space-y-6">
       {/* Top Header */}
@@ -565,39 +660,82 @@ export default function DeploymentDetailPage() {
         )}
       </div>
 
-      {/* Failure Callout Banner */}
-      {deployment?.status === 'failed' && project && (
-        <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <div className="p-2 rounded-xl bg-rose-500/20 text-rose-400 mt-0.5">
-              <AlertTriangle className="w-5 h-5" />
+      {/* Smart Root Cause & Failure Diagnostic Card */}
+      {deployment?.status === 'failed' && failureDiagnosis && (
+        <div className="rounded-2xl border border-rose-500/30 bg-gradient-to-br from-rose-950/40 via-card to-background p-5 shadow-xl space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+            <div className="flex items-start gap-3.5">
+              <div className="p-2.5 rounded-xl bg-rose-500/20 text-rose-400 shrink-0 mt-0.5">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h4 className="text-base font-bold text-rose-200">
+                    {failureDiagnosis.title}
+                  </h4>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                    DIAGNOSTIK OTOMATIS
+                  </span>
+                </div>
+                <p className="text-xs text-rose-200/90 leading-relaxed">
+                  <strong className="text-rose-100">Penyebab:</strong> {failureDiagnosis.reason}
+                </p>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  <strong className="text-blue-400">Rekomendasi Solusi:</strong> {failureDiagnosis.solution}
+                </p>
+              </div>
             </div>
-            <div>
-              <h4 className="text-sm font-bold text-rose-300">
-                Deployment Gagal pada Tahapan Terakhir
-              </h4>
-              <p className="text-xs text-rose-200/80 mt-1">
-                Periksa log error di bawah. Anda dapat memperbaiki konfigurasi (port, database, env var, atau branch) lalu deploy ulang langsung ke server.
-              </p>
+
+            <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
+              {project && (
+                <button
+                  onClick={() => setEditModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all shadow-md shadow-blue-600/20"
+                >
+                  <FileCode2 className="w-3.5 h-3.5" />
+                  <span>Edit Konfigurasi</span>
+                </button>
+              )}
+              {project && (
+                <button
+                  onClick={handleRedeploy}
+                  disabled={redeploying}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-rose-500/40 hover:bg-rose-500/20 text-rose-200 text-xs font-semibold transition-all"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${redeploying ? 'animate-spin' : ''}`} />
+                  <span>Deploy Ulang</span>
+                </button>
+              )}
             </div>
           </div>
-          <div className="flex items-center gap-2.5 shrink-0">
-            <button
-              onClick={() => setEditModalOpen(true)}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all shadow-md shadow-blue-600/20"
-            >
-              <FileCode2 className="w-3.5 h-3.5" />
-              <span>Edit &amp; Deploy Ulang</span>
-            </button>
-            <button
-              onClick={handleRedeploy}
-              disabled={redeploying}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-rose-500/40 hover:bg-rose-500/20 text-rose-200 text-xs font-semibold transition-all"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${redeploying ? 'animate-spin' : ''}`} />
-              <span>Coba Deploy Ulang</span>
-            </button>
-          </div>
+
+          {/* Ubuntu Server CLI Diagnostic Command */}
+          {failureDiagnosis.serverCheckCmd && (
+            <div className="pt-3 border-t border-rose-500/20 space-y-1.5">
+              <div className="flex items-center justify-between text-[11px] text-gray-400">
+                <span className="flex items-center gap-1.5 font-semibold text-slate-300">
+                  <Terminal className="w-3.5 h-3.5 text-rose-400" />
+                  Cek langsung di Terminal Ubuntu Server:
+                </span>
+                <span className="text-[10px] text-gray-500 font-mono">Buka terminal SSH server fa</span>
+              </div>
+              <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-emerald-400">
+                <code className="truncate select-all">{failureDiagnosis.serverCheckCmd}</code>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(failureDiagnosis.serverCheckCmd!);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  }}
+                  className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-sans flex items-center gap-1 shrink-0 transition-colors"
+                  title="Salin Command ke Clipboard"
+                >
+                  {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                  <span>{copied ? 'Tersalin' : 'Salin'}</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
