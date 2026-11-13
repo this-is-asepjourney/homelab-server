@@ -699,6 +699,20 @@ class DeploymentEngine:
         os.makedirs(target_dir, exist_ok=True)
         git_dir = os.path.join(target_dir, ".git")
 
+        # Auto-normalize GitHub / GitLab branch URLs (e.g. https://github.com/owner/repo/tree/branch_name)
+        if repo_url and "/tree/" in repo_url:
+            parts = repo_url.split("/tree/", 1)
+            clean_base = parts[0].rstrip("/")
+            extracted_branch = parts[1].strip("/").split("/")[0]
+            log_callback("info", f"[Git] Normalisasi URL browser Git: '{repo_url}' -> base: '{clean_base}', branch: '{extracted_branch}'")
+            repo_url = clean_base
+            if not repo_url.endswith(".git") and "github.com" in repo_url:
+                repo_url += ".git"
+            if extracted_branch and (not branch or branch in ("main", "master")):
+                branch = extracted_branch
+        elif repo_url and not repo_url.endswith(".git") and "github.com" in repo_url:
+            repo_url = repo_url.rstrip("/") + ".git"
+
         if os.path.exists(git_dir):
             log_callback("info", f"[Git] Fetching latest changes from branch '{branch}'...")
             subprocess.run(["git", "-C", target_dir, "fetch", "origin", branch], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)

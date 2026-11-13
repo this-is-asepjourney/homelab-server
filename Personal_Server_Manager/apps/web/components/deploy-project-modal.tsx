@@ -241,10 +241,19 @@ export function DeployProjectModal({
   };
 
   const handleRepoUrlChange = (url: string) => {
-    setRepositoryUrl(url);
+    let cleanUrl = url.trim();
+    if (cleanUrl.includes('/tree/')) {
+      const parts = cleanUrl.split('/tree/');
+      cleanUrl = parts[0].replace(/\/+$/, '');
+      const extractedBranch = parts[1]?.replace(/^\/+|\/+$/g, '').split('/')[0];
+      if (extractedBranch) {
+        setBranch(extractedBranch);
+      }
+    }
+    setRepositoryUrl(cleanUrl);
     if (!name || name === 'my-app') {
       try {
-        const clean = url.replace(/\.git$/, '');
+        const clean = cleanUrl.replace(/\.git$/, '');
         const segs = clean.split('/');
         const last = segs[segs.length - 1];
         if (last) {

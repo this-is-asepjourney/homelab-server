@@ -964,6 +964,16 @@ def cmd_update_project(args):
 
     # Build update payload
     payload = {}
+    if getattr(args, "repo", None):
+        raw_repo = args.repo.strip()
+        if "/tree/" in raw_repo:
+            parts = raw_repo.split("/tree/", 1)
+            raw_repo = parts[0].rstrip("/")
+            if not getattr(args, "branch", None):
+                payload["branch"] = parts[1].strip("/").split("/")[0]
+        if not raw_repo.endswith(".git") and "github.com" in raw_repo:
+            raw_repo += ".git"
+        payload["repository_url"] = raw_repo
     if args.name:
         payload["name"] = args.name.strip()
     if args.branch:
@@ -1073,6 +1083,7 @@ def main():
     parser_up = subparsers.add_parser("update-project", help="Perbarui konfigurasi project dan picu deployment rilis baru ke container server")
     parser_up.add_argument("project", nargs="?", default="", help="Nama atau ID project yang ingin diupdate")
     parser_up.add_argument("--host", default=None, help="IP Host API Gateway (default: auto-detect LAN/Tailscale)")
+    parser_up.add_argument("--repo", help="Repository URL Git (e.g. https://github.com/user/repo.git)")
     parser_up.add_argument("--name", help="Nama baru untuk project")
     parser_up.add_argument("--branch", help="Target branch Git")
     parser_up.add_argument("--port", help="Port mapping Docker (e.g. 3000:3000)")

@@ -1465,7 +1465,16 @@ export default function ProjectDetailPage() {
                   <input
                     type="text"
                     value={projectRepoUrl}
-                    onChange={(e) => setProjectRepoUrl(e.target.value)}
+                    onChange={(e) => {
+                      let val = e.target.value;
+                      if (val.includes('/tree/')) {
+                        const parts = val.split('/tree/');
+                        val = parts[0].replace(/\/+$/, '');
+                        const ext = parts[1]?.replace(/^\/+|\/+$/g, '').split('/')[0];
+                        if (ext) setProjectBranch(ext);
+                      }
+                      setProjectRepoUrl(val);
+                    }}
                     placeholder="https://github.com/user/repository.git"
                     className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-xs focus:outline-none focus:ring-2 focus:ring-purple-500"
                   />

@@ -1,6 +1,6 @@
 import os
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from apps.api.app.database.session import get_db
@@ -50,6 +50,21 @@ def mask_secret(val: str) -> str:
     if len(val) <= 4:
         return "****"
     return val[:2] + "****" + val[-2:]
+
+def sanitize_git_url_and_branch(repo_url: Optional[str], branch: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    if not repo_url:
+        return repo_url, branch
+    clean_url = repo_url.strip()
+    clean_branch = (branch or "").strip()
+    if "/tree/" in clean_url:
+        parts = clean_url.split("/tree/", 1)
+        clean_url = parts[0].rstrip("/")
+        extracted_branch = parts[1].strip("/").split("/")[0]
+        if extracted_branch and (not clean_branch or clean_branch in ("main", "master")):
+            clean_branch = extracted_branch
+    if clean_url and not clean_url.endswith(".git") and "github.com" in clean_url:
+        clean_url = clean_url.rstrip("/") + ".git"
+    return clean_url, (clean_branch or "main")
 
 @router.get("", response_model=List[ProjectResponse])
 def list_projects(
@@ -182,10 +197,11 @@ async def create_project(
     db.refresh(project)
 
     # Create project source config
+    sanitized_repo, sanitized_branch = sanitize_git_url_and_branch(payload.repository_url, payload.branch)
     source = ProjectSource(
         project_id=project.id,
-        repository_url=payload.repository_url,
-        branch=payload.branch or "main",
+        repository_url=sanitized_repo,
+        branch=sanitized_branch or "main",
         dockerfile_path=payload.dockerfile_path or "Dockerfile",
         compose_path=payload.compose_path or "docker-compose.yml"
     )
@@ -377,6 +393,14 @@ async def execute_project_redeploy(
     current_user_id: str
 ) -> DeploymentResponse:
     src = project.source
+    if src and src.repository_url:
+        s_url, s_branch = sanitize_git_url_and_branch(src.repository_url, src.branch)
+        if s_url != src.repository_url or s_branch != src.branch:
+            src.repository_url = s_url
+            src.branch = s_branch
+            db.commit()
+            db.refresh(src)
+
     last_deployment = db.query(Deployment).filter(
         Deployment.project_id == project.id
     ).order_by(Deployment.version.desc()).first()
@@ -540,10 +564,14 @@ async def update_project(
 
     src = p.source
     if src:
-        if payload.repository_url is not None:
-            src.repository_url = payload.repository_url
-        if payload.branch is not None:
-            src.branch = payload.branch
+        if payload.repository_url is not None or payload.branch is not None:
+            raw_url = payload.repository_url if payload.repository_url is not None else src.repository_url
+            raw_branch = payload.branch if payload.branch is not None else src.branch
+            s_url, s_branch = sanitize_git_url_and_branch(raw_url, raw_branch)
+            if payload.repository_url is not None:
+                src.repository_url = s_url
+            if payload.branch is not None or (s_branch and s_branch != raw_branch):
+                src.branch = s_branch
         if payload.dockerfile_path is not None:
             src.dockerfile_path = payload.dockerfile_path
         if payload.compose_path is not None:
