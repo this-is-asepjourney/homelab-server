@@ -1020,7 +1020,10 @@ def _resolve_project_workspace_dir(project_id: str) -> str:
 @router.get("/dockerfile/templates")
 def get_dockerfile_templates_endpoint():
     """List all available professional multi-stage Dockerfile templates."""
-    from apps.agent.app.deployment.dockerfile_generator import get_available_templates
+    try:
+        from apps.api.app.services.dockerfile_generator import get_available_templates
+    except ImportError:
+        from apps.agent.app.deployment.dockerfile_generator import get_available_templates
     return {
         "success": True,
         "templates": get_available_templates(),
@@ -1030,11 +1033,18 @@ def get_dockerfile_templates_endpoint():
 @router.post("/dockerfile/generate")
 def generate_dockerfile_preview_endpoint(payload: DockerfileGenerateRequest):
     """Generate professional Dockerfile and .dockerignore for a framework & port."""
-    from apps.agent.app.deployment.dockerfile_generator import (
-        generate_dockerfile,
-        generate_dockerignore,
-        TEMPLATES,
-    )
+    try:
+        from apps.api.app.services.dockerfile_generator import (
+            generate_dockerfile,
+            generate_dockerignore,
+            TEMPLATES,
+        )
+    except ImportError:
+        from apps.agent.app.deployment.dockerfile_generator import (
+            generate_dockerfile,
+            generate_dockerignore,
+            TEMPLATES,
+        )
     tmpl_key = payload.template_key
     if not tmpl_key:
         fw_clean = (payload.framework or "").lower()
@@ -1083,12 +1093,20 @@ def get_project_dockerfile_endpoint(
     if not p:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    from apps.agent.app.deployment.dockerfile_generator import (
-        generate_dockerfile,
-        generate_dockerignore,
-        detect_project_stack,
-        TEMPLATES,
-    )
+    try:
+        from apps.api.app.services.dockerfile_generator import (
+            generate_dockerfile,
+            generate_dockerignore,
+            detect_project_stack,
+            TEMPLATES,
+        )
+    except ImportError:
+        from apps.agent.app.deployment.dockerfile_generator import (
+            generate_dockerfile,
+            generate_dockerignore,
+            detect_project_stack,
+            TEMPLATES,
+        )
 
     ws_dir = _resolve_project_workspace_dir(project_id)
     df_rel = p.source.dockerfile_path if p.source and p.source.dockerfile_path else "Dockerfile"

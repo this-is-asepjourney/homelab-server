@@ -20,6 +20,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Single Source of Truth: Copy PAP Core & PSM Control Plane
 COPY ["Personal Api Platform/app", "./app"]
 COPY ["Personal_Server_Manager/apps/api", "./apps/api"]
+COPY ["Personal_Server_Manager/apps/agent", "./apps/agent"]
 COPY ["Personal Api Platform/migrations", "./migrations"]
 COPY ["Personal Api Platform/alembic.ini", "./alembic.ini"]
 

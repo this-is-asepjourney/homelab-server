@@ -111,6 +111,7 @@ services:
     volumes:
       - ./Personal Api Platform/app:/app/app:rw
       - ./Personal_Server_Manager/apps/api:/app/apps/api:rw
+      - ./Personal_Server_Manager/apps/agent:/app/apps/agent:ro
       - psm-storage:/opt/psm
       - homelab-backups:/app/backups
       - ./dns/homelab.hosts:/app/dns/homelab.hosts:rw
