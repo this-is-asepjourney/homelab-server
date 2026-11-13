@@ -202,7 +202,17 @@ export function DeployProjectModal({
   const selectedServer = servers.find((s) => s.id === serverId) || servers[0];
   // Realtime port conflict detection
   const currentHpNum = parseInt(hostPort.trim(), 10);
-  const portConflictReason = !isNaN(currentHpNum) ? reservedPorts[currentHpNum] : null;
+  const rawPortConflict = !isNaN(currentHpNum) ? reservedPorts[currentHpNum] : null;
+  // If editing an existing project, using its own active port is completely valid and NOT a conflict!
+  const isSelfProjectPort = Boolean(
+    existingProject &&
+    rawPortConflict &&
+    (
+      rawPortConflict.toLowerCase().includes((existingProject.name || '').toLowerCase()) ||
+      (existingProject.port_mappings && existingProject.port_mappings.includes(String(currentHpNum)))
+    )
+  );
+  const portConflictReason = isSelfProjectPort ? null : rawPortConflict;
   const serverHost = selectedServer?.hostname || 'localhost';
 
   // Quick port presets
@@ -887,6 +897,12 @@ export function DeployProjectModal({
                       }`}
                     />
                     <span className="text-[10px] text-gray-500">Port yang dibuka di server Ubuntu Anda</span>
+                    {isSelfProjectPort && (
+                      <div className="text-[11px] text-emerald-400 flex items-center gap-1 mt-1 font-medium">
+                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                        <span>Port {hostPort} adalah port aktif milik project ini (aman digunakan).</span>
+                      </div>
+                    )}
                   </div>
 
                   <div>
