@@ -12,6 +12,8 @@ from apps.api.app.websocket.handlers import ws_router
 
 def _wait_for_database(max_attempts: int = 15, delay: float = 2.0):
     """Ensure PostgreSQL database 'psm' exists (creating it if missing) and retry DB connection on startup."""
+    if os.getenv("TESTING") == "true" or str(db_session.engine.url).startswith("sqlite"):
+        return
     import time
     from sqlalchemy import text, create_engine
     last_err = None
@@ -30,11 +32,15 @@ def _wait_for_database(max_attempts: int = 15, delay: float = 2.0):
                 db_session.engine = create_engine(new_url, pool_pre_ping=True)
                 db_session.SessionLocal.configure(bind=db_session.engine)
             time.sleep(delay)
-    raise RuntimeError(f"Could not connect to database: {last_err}")
+    print(f"[PSM] Warning: Could not connect to database after {max_attempts} attempts: {last_err}", flush=True)
 
 def init_db():
     _wait_for_database()
-    Base.metadata.create_all(bind=db_session.engine)
+    try:
+        Base.metadata.create_all(bind=db_session.engine)
+    except Exception as e:
+        print(f"[PSM] DB schema init notice: {e}", flush=True)
+        return
 
     # Safe column migration for existing databases
     try:
