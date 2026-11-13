@@ -53,3 +53,25 @@ def test_dockerfile_generate_preview_vite(client):
     assert "FROM nginx:alpine AS runner" in data["dockerfile"]
     assert "try_files" in data["dockerfile"]
     assert "index.html" in data["dockerfile"]
+
+
+def test_dockerfile_generate_additional_frameworks_and_default_port(client):
+    res_laravel = client.post(
+        "/api/v1/projects/dockerfile/generate",
+        json={"framework": "Laravel", "port": None, "project_name": "simrs-app"},
+    )
+    assert res_laravel.status_code == 200
+    data_laravel = res_laravel.json()
+    assert data_laravel["success"] is True
+    assert data_laravel["template_key"] == "laravel"
+    assert data_laravel["recommended_port"] == 8080
+    assert "EXPOSE 8080" in data_laravel["dockerfile"]
+
+    res_compose = client.post(
+        "/api/v1/projects/dockerfile/generate",
+        json={"framework": "Docker Compose", "project_name": "stack-app"},
+    )
+    assert res_compose.status_code == 200
+    data_compose = res_compose.json()
+    assert data_compose["success"] is True
+    assert bool(data_compose["dockerfile"]) is True

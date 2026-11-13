@@ -182,17 +182,20 @@ export function DeployProjectModal({
     try {
       setLoadingPreview(true);
       setShowDockerfilePreview(true);
+      const parsedPort = parseInt(containerPort, 10);
       const res = await api.generateDockerfilePreview({
         framework,
-        port: parseInt(containerPort, 10) || 3000,
-        project_name: name || 'my-app',
+        port: Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : undefined,
+        project_name: name.trim() || 'my-app',
       });
       if (res && res.dockerfile) {
         setPreviewDockerfile(res.dockerfile);
         setPreviewDockerignore(res.dockerignore || '');
+      } else {
+        setPreviewDockerfile('# Error: Server tidak mengembalikan konten Dockerfile.');
       }
     } catch (e: any) {
-      setPreviewDockerfile(`# Error: ${e.message}`);
+      setPreviewDockerfile(`# Error: ${e?.message || 'Failed to generate Dockerfile preview'}`);
     } finally {
       setLoadingPreview(false);
     }

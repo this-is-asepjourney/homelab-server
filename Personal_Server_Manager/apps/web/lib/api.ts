@@ -66,6 +66,22 @@ export async function fetchWithAuth(endpoint: string, options: RequestInit = {})
   return response;
 }
 
+/** Extract an informative API error message supporting both FastAPI (`detail`) and PAP (`message`) payloads. */
+async function extractApiErrorMessage(res: Response, fallback: string): Promise<string> {
+  try {
+    const err = await res.json();
+    const rawMsg = err?.detail ?? err?.message ?? err?.error?.code;
+    if (rawMsg) {
+      const detailText = typeof rawMsg === 'string' ? rawMsg : JSON.stringify(rawMsg);
+      return `${fallback} (HTTP ${res.status}: ${detailText})`;
+    }
+  } catch {
+    // Non-JSON body (e.g. Nginx 502 HTML page)
+  }
+  const statusInfo = res.statusText ? `${res.status} ${res.statusText}` : `${res.status}`;
+  return `${fallback} (HTTP ${statusInfo})`;
+}
+
 export const api = {
   // Auth
   async login(email: string, password: string) {
@@ -375,13 +391,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error('Failed to generate Dockerfile preview');
+    if (!res.ok) {
+      throw new Error(await extractApiErrorMessage(res, 'Failed to generate Dockerfile preview'));
+    }
     return res.json();
   },
 
   async getProjectDockerfile(projectId: string) {
     const res = await fetchWithAuth(`/api/v1/projects/${projectId}/dockerfile`);
-    if (!res.ok) throw new Error('Failed to fetch project Dockerfile');
+    if (!res.ok) {
+      throw new Error(await extractApiErrorMessage(res, 'Failed to fetch project Dockerfile'));
+    }
     return res.json();
   },
 
@@ -391,8 +411,7 @@ export const api = {
       body: JSON.stringify(data),
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || 'Failed to update project Dockerfile');
+      throw new Error(await extractApiErrorMessage(res, 'Failed to update project Dockerfile'));
     }
     return res.json();
   },
