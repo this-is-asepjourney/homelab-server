@@ -12,17 +12,12 @@ class JobExecutor:
 
         start_time = time.time()
         log_sequence = 0
-        buffered_logs: List[Dict[str, Any]] = []
-
         def log_callback(level: str, message: str):
             nonlocal log_sequence
             log_sequence += 1
             entry = {"sequence": log_sequence, "level": level, "message": message}
-            buffered_logs.append(entry)
-            # Batch send every 5 logs or immediately if needed
-            if len(buffered_logs) >= 5:
-                JobExecutor.send_logs(job_id, list(buffered_logs))
-                buffered_logs.clear()
+            # Stream every log line immediately for instant real-time progress in UI
+            JobExecutor.send_logs(job_id, [entry])
 
         handler = HANDLERS[job_type]
         status = "success"
@@ -35,10 +30,6 @@ class JobExecutor:
             status = "failed"
             err_msg = str(e)
             log_callback("error", f"Job failed: {err_msg}")
-
-        # Flush remaining logs
-        if buffered_logs:
-            JobExecutor.send_logs(job_id, buffered_logs)
 
         duration = int(time.time() - start_time)
         JobExecutor.report_complete(job_id, status, output, err_msg, duration)

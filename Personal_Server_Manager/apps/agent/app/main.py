@@ -125,6 +125,34 @@ async def websocket_loop():
             await asyncio.sleep(retry_delay)
             retry_delay = min(retry_delay * 2, 30)
 
+async def job_polling_loop():
+    """Active fallback poller: guarantees queued jobs execute even if WebSocket briefly disconnects."""
+    url = f"{agent_settings.CONTROL_PLANE_URL}/api/v1/agents/jobs/claim"
+    headers = {
+        "X-Agent-Token": agent_settings.AGENT_TOKEN,
+        "X-Server-Id": agent_settings.SERVER_ID
+    }
+    while True:
+        try:
+            async with httpx.AsyncClient(timeout=6) as client:
+                res = await client.post(url, headers=headers)
+                if res.status_code == 200:
+                    data = res.json()
+                    job_data = data.get("job")
+                    if job_data:
+                        logger.info(f"Claimed pending job via poll: {job_data.get('job_type')} (id: {job_data.get('id')})")
+                        asyncio.get_event_loop().run_in_executor(
+                            None,
+                            JobExecutor.execute_job,
+                            job_data.get("id"),
+                            job_data.get("job_type"),
+                            job_data.get("server_id"),
+                            job_data.get("payload")
+                        )
+        except Exception as e:
+            logger.debug(f"Job polling check failed: {e}")
+        await asyncio.sleep(2.5)
+
 async def main():
     logger.info(f"Starting PSM Agent v{agent_settings.AGENT_VERSION} for server '{agent_settings.SERVER_ID}'")
     await register_agent()
@@ -132,7 +160,8 @@ async def main():
         heartbeat_loop(),
         metrics_loop(),
         inventory_loop(),
-        websocket_loop()
+        websocket_loop(),
+        job_polling_loop()
     )
 
 if __name__ == "__main__":

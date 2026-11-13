@@ -16,9 +16,7 @@ from apps.agent.app.deployment.dockerfile_generator import (
 def should_log_build_line(line: str) -> bool:
     if not line:
         return False
-    # Skip high-frequency BuildKit transfer/progress ticks that flood and bloat the database
-    if re.search(r"^\s*#\d+\s+(?:transferring|extracting|preparing)\b", line, re.I):
-        return False
+    # Skip only repetitive timer lines like "#1 [internal] 0.1s" to keep build logs informative and clean
     if re.search(r"^\s*#\d+\s+\[.*\]\s+\d+\.\d+s\s*$", line):
         return False
     return True
@@ -744,15 +742,17 @@ class DeploymentEngine:
 
         display_url = re.sub(r"https?://[^@]+@github\.com", "https://github.com", repo_url)
 
+        git_env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+
         if os.path.exists(git_dir):
             safe_log("info", f"[Git] Fetching latest changes from branch '{branch}'...")
-            subprocess.run(["git", "-C", target_dir, "remote", "set-url", "origin", auth_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            fetch_res = subprocess.run(["git", "-C", target_dir, "fetch", "origin", branch], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            subprocess.run(["git", "-C", target_dir, "remote", "set-url", "origin", auth_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=git_env)
+            fetch_res = subprocess.run(["git", "-C", target_dir, "fetch", "origin", branch], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=git_env)
             active_branch = branch
             if fetch_res.returncode != 0:
                 candidates = ["Main", "master"] if branch == "main" else (["main", "master"] if branch == "Main" else [])
                 for cb in candidates:
-                    cb_res = subprocess.run(["git", "-C", target_dir, "fetch", "origin", cb], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    cb_res = subprocess.run(["git", "-C", target_dir, "fetch", "origin", cb], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=git_env)
                     if cb_res.returncode == 0:
                         active_branch = cb
                         safe_log("info", f"[Git] Fetch berhasil menggunakan branch alternatif '{active_branch}'")
@@ -765,7 +765,7 @@ class DeploymentEngine:
             safe_log("info", f"[Git] Cloning repository {display_url} (branch: {branch})...")
             cmd = ["git", "clone", "--depth", "1", "--branch", branch, auth_url, target_dir]
 
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=git_env)
         for line in proc.stdout:
             clean = line.strip()
             if clean:
@@ -789,7 +789,7 @@ class DeploymentEngine:
                     shutil.rmtree(target_dir, ignore_errors=True)
                 os.makedirs(target_dir, exist_ok=True)
                 cmd_fb = ["git", "clone", "--depth", "1", "--branch", fb_branch, auth_url, target_dir]
-                proc_fb = subprocess.Popen(cmd_fb, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                proc_fb = subprocess.Popen(cmd_fb, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=git_env)
                 for line in proc_fb.stdout:
                     clean = line.strip()
                     if clean:
@@ -807,7 +807,7 @@ class DeploymentEngine:
                     shutil.rmtree(target_dir, ignore_errors=True)
                 os.makedirs(target_dir, exist_ok=True)
                 cmd_head = ["git", "clone", "--depth", "1", auth_url, target_dir]
-                proc_head = subprocess.Popen(cmd_head, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                proc_head = subprocess.Popen(cmd_head, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=git_env)
                 for line in proc_head.stdout:
                     clean = line.strip()
                     if clean:
@@ -1163,7 +1163,7 @@ class DeploymentEngine:
 
         if cli_available:
             log_callback("info", f"[Docker-CLI] Building image '{sanitized_tag}' from {dockerfile_path}...")
-            build_cmd = [docker_bin, "build", "-t", sanitized_tag, "-f", dockerfile_path, "."]
+            build_cmd = [docker_bin, "build", "--progress=plain", "-t", sanitized_tag, "-f", dockerfile_path, "."]
             try:
                 build_proc = subprocess.Popen(build_cmd, cwd=workspace_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
                 for line in build_proc.stdout:
