@@ -81,6 +81,27 @@ def register_agent(payload: AgentRegisterRequest, db: Session = Depends(get_db))
 
     server.status = "online"
     server.last_seen = now
+
+    # Auto-fail or cleanup orphaned running jobs from before agent restart
+    stale_jobs = db.query(Job).filter(
+        Job.server_id == server.id,
+        Job.status == "running"
+    ).all()
+    for s_job in stale_jobs:
+        s_job.status = "failed"
+        s_job.finished_at = now
+        if s_job.deployment_id:
+            dep = db.query(Deployment).filter(Deployment.id == s_job.deployment_id).first()
+            if dep and dep.status in ("building", "queued", "preparing", "deploying"):
+                dep.status = "failed"
+                dep.finished_at = now
+                db.add(DeploymentLog(
+                    deployment_id=dep.id,
+                    sequence=999,
+                    level="warning",
+                    message="Deployment terhenti karena server/agen direstart. Silakan klik 'Deploy Ulang' di web console."
+                ))
+
     db.commit()
 
     return {

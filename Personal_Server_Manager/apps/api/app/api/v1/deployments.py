@@ -534,6 +534,14 @@ def cancel_deployment(
 
     d.status = "cancelled"
     d.finished_at = datetime.now(timezone.utc)
+
+    # Also cancel any associated jobs in the queue
+    linked_jobs = db.query(Job).filter(Job.deployment_id == deployment_id).all()
+    for j in linked_jobs:
+        if j.status in ("queued", "running"):
+            j.status = "cancelled"
+            j.finished_at = datetime.now(timezone.utc)
+
     db.commit()
 
     log_activity(
