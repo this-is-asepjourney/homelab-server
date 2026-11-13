@@ -747,8 +747,17 @@ class DeploymentEngine:
         if os.path.exists(git_dir):
             safe_log("info", f"[Git] Fetching latest changes from branch '{branch}'...")
             subprocess.run(["git", "-C", target_dir, "remote", "set-url", "origin", auth_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(["git", "-C", target_dir, "fetch", "origin", branch], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            cmd = ["git", "-C", target_dir, "reset", "--hard", f"origin/{branch}"]
+            fetch_res = subprocess.run(["git", "-C", target_dir, "fetch", "origin", branch], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            active_branch = branch
+            if fetch_res.returncode != 0:
+                candidates = ["Main", "master"] if branch == "main" else (["main", "master"] if branch == "Main" else [])
+                for cb in candidates:
+                    cb_res = subprocess.run(["git", "-C", target_dir, "fetch", "origin", cb], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    if cb_res.returncode == 0:
+                        active_branch = cb
+                        safe_log("info", f"[Git] Fetch berhasil menggunakan branch alternatif '{active_branch}'")
+                        break
+            cmd = ["git", "-C", target_dir, "reset", "--hard", f"origin/{active_branch}"]
         else:
             if os.path.exists(target_dir) and os.listdir(target_dir):
                 shutil.rmtree(target_dir, ignore_errors=True)
@@ -764,7 +773,52 @@ class DeploymentEngine:
         proc.wait()
 
         if proc.returncode != 0:
-            return False
+            # Fallback 1: Case-sensitivity or naming mismatch (e.g. 'main' vs 'Main' or 'master')
+            candidate_branches = []
+            if branch == "main":
+                candidate_branches = ["Main", "master"]
+            elif branch == "Main":
+                candidate_branches = ["main", "master"]
+            elif branch == "master":
+                candidate_branches = ["main", "Main"]
+
+            fallback_success = False
+            for fb_branch in candidate_branches:
+                safe_log("warning", f"[Git] Branch '{branch}' tidak ditemukan di remote, mencoba alternatif '{fb_branch}'...")
+                if os.path.exists(target_dir):
+                    shutil.rmtree(target_dir, ignore_errors=True)
+                os.makedirs(target_dir, exist_ok=True)
+                cmd_fb = ["git", "clone", "--depth", "1", "--branch", fb_branch, auth_url, target_dir]
+                proc_fb = subprocess.Popen(cmd_fb, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                for line in proc_fb.stdout:
+                    clean = line.strip()
+                    if clean:
+                        safe_log("info", clean)
+                proc_fb.wait()
+                if proc_fb.returncode == 0:
+                    safe_log("info", f"[Git] Berhasil clone menggunakan branch alternatif '{fb_branch}'!")
+                    fallback_success = True
+                    break
+
+            # Fallback 2: Clone repository default HEAD branch without explicit --branch
+            if not fallback_success:
+                safe_log("warning", f"[Git] Mencoba clone default branch (HEAD) repository...")
+                if os.path.exists(target_dir):
+                    shutil.rmtree(target_dir, ignore_errors=True)
+                os.makedirs(target_dir, exist_ok=True)
+                cmd_head = ["git", "clone", "--depth", "1", auth_url, target_dir]
+                proc_head = subprocess.Popen(cmd_head, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                for line in proc_head.stdout:
+                    clean = line.strip()
+                    if clean:
+                        safe_log("info", clean)
+                proc_head.wait()
+                if proc_head.returncode == 0:
+                    safe_log("info", "[Git] Berhasil clone branch default repository!")
+                    fallback_success = True
+
+            if not fallback_success:
+                return False
 
         if commit_hash and commit_hash != "HEAD":
             safe_log("info", f"[Git] Checking out commit {commit_hash}...")
