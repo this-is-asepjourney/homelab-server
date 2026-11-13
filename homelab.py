@@ -182,7 +182,7 @@ def get_psm_auth_header(host: str) -> str:
             headers={"Content-Type": "application/json", "Accept": "application/json"},
             method="POST"
         )
-        with urllib.request.urlopen(req, timeout=4.0) as resp:
+        with urllib.request.urlopen(req, timeout=10.0) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             token = data.get("access_token")
             expires_in = data.get("expires_in", 3600)

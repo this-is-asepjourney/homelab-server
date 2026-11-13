@@ -106,14 +106,6 @@ services:
       - ENCRYPTION_MASTER_KEY=${ENCRYPTION_MASTER_KEY:-dGhpcy1pcy1hLXNhbXBsZS1mZXJuZXQta2V5LTMyeS0=}
       - HOMELAB_AGENT_TOKEN=${HOMELAB_AGENT_TOKEN:-psm_agent_homelab_default_token}
       - PROMETHEUS_URL=${PROMETHEUS_URL:-http://host.docker.internal:9001}
-      - INFLUXDB_HOST=${INFLUXDB_HOST:-influxdb}
-      - INFLUXDB_PORT=${INFLUXDB_PORT:-8086}
-      - INFLUXDB_URL=${INFLUXDB_URL:-http://influxdb:8086}
-      - INFLUXDB_USER=${INFLUXDB_USER:-appuser}
-      - INFLUXDB_PASSWORD=${INFLUXDB_PASSWORD:-admin12345}
-      - INFLUXDB_ORG=${INFLUXDB_ORG:-homelab}
-      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET:-eternal_telemetry}
-      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN:-homelab-influxdb-master-auth-token-2026}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -144,75 +136,6 @@ services:
           - pap-api
           - api
           - psm-api
-
-  # ═════════════════════════════════════════════════════════════════
-  # 3b. PAP BACKGROUND WORKER (Decoupled Engine for IoT, MQTT & Automation)
-  # Menjalankan consumer MQTT InfluxDB, auto-backup scheduler, dan IoT fleet watchdog
-  # ═════════════════════════════════════════════════════════════════
-  pap-worker:
-    build:
-      context: .
-      dockerfile: "Personal Api Platform/docker/Dockerfile"
-    container_name: pap-worker
-    restart: unless-stopped
-    stop_grace_period: 3s
-    command: ["python", "-m", "app.worker"]
-    env_file:
-      - .env
-    environment:
-      - ROLE=worker
-      - PAP_API_URL=http://pap-api:8000
-      - ENABLE_AUTO_BACKUP=true
-      - BACKUP_INTERVAL_HOURS=24
-      - BACKUP_RETENTION_DAYS=7
-      - POSTGRES_DB=${POSTGRES_DB:-psm}
-      - POSTGRES_USER=${POSTGRES_USER:-appuser}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-admin12345}
-      - POSTGRES_HOST=${POSTGRES_HOST:-192.168.25.101}
-      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
-      - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg2://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-admin12345}@${POSTGRES_HOST:-192.168.25.101}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-psm}}
-      - PAP_DATABASE_URL=${PAP_DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-admin12345}@${POSTGRES_HOST:-192.168.25.101}:${POSTGRES_PORT:-5432}/pap_core}
-      - STOCK_DB_HOST=${STOCK_DB_HOST:-192.168.25.101}
-      - STOCK_DB_PORT=${STOCK_DB_PORT:-3306}
-      - STOCK_DB_NAME=${STOCK_DB_NAME:-appdb}
-      - STOCK_DB_USER=${STOCK_DB_USER:-appuser}
-      - STOCK_DB_PASSWORD=${STOCK_DB_PASSWORD:-admin12345}
-      - MYSQL_HOST=${MYSQL_HOST:-192.168.25.101}
-      - MYSQL_PORT=${MYSQL_PORT:-3306}
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-adminroot12345}
-      - MYSQL_DATABASE=${MYSQL_DATABASE:-appdb}
-      - MYSQL_USER=${MYSQL_USER:-appuser}
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-admin12345}
-      - BACKUP_STORAGE_DIR=/app/backups
-      - PROMETHEUS_URL=${PROMETHEUS_URL:-http://host.docker.internal:9001}
-      - MQTT_HOST=${MQTT_HOST:-192.168.25.101}
-      - MQTT_PORT=${MQTT_PORT:-1883}
-      - MQTT_USERNAME=${MQTT_USERNAME:-useriot}
-      - MQTT_PASSWORD=${MQTT_PASSWORD:-25022002}
-      - INFLUXDB_HOST=${INFLUXDB_HOST:-influxdb}
-      - INFLUXDB_PORT=${INFLUXDB_PORT:-8086}
-      - INFLUXDB_URL=${INFLUXDB_URL:-http://influxdb:8086}
-      - INFLUXDB_USER=${INFLUXDB_USER:-appuser}
-      - INFLUXDB_PASSWORD=${INFLUXDB_PASSWORD:-admin12345}
-      - INFLUXDB_ORG=${INFLUXDB_ORG:-homelab}
-      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET:-eternal_telemetry}
-      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN:-homelab-influxdb-master-auth-token-2026}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - ./Personal Api Platform/app:/app/app:rw
-      - ./Personal_Server_Manager/apps/api:/app/apps/api:rw
-      - homelab-backups:/app/backups
-      - ./dns/homelab.hosts:/app/dns/homelab.hosts:rw
-      - ./router/conf.d/projects:/app/router/conf.d/projects:rw
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    mem_limit: 256m
-    cpus: 0.50
-    depends_on:
-      pap-api:
-        condition: service_started
-    networks:
-      - homelab-network
 
   # ═════════════════════════════════════════════════════════════════
   # 4. PERSONAL SERVER MANAGER (PSM Frontend Web & Local Agent)
@@ -329,99 +252,12 @@ services:
       timeout: 5s
       retries: 3
 
-  # ═════════════════════════════════════════════════════════════════
-  # 6. INFLUXDB TIME-SERIES DATABASE (:8086)
-  # Dedicated TSDB for IoT Telemetry & Metrics (MQTT -> API -> InfluxDB -> Grafana)
-  # ═════════════════════════════════════════════════════════════════
-  influxdb:
-    image: influxdb:2.7-alpine
-    container_name: homelab_influxdb
-    restart: unless-stopped
-    mem_limit: 384m
-    cpus: 0.5
-    ports:
-      - "${INFLUXDB_PORT:-8086}:8086"
-    environment:
-      - DOCKER_INFLUXDB_INIT_MODE=setup
-      - DOCKER_INFLUXDB_INIT_USERNAME=${INFLUXDB_USER:-appuser}
-      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUXDB_PASSWORD:-admin12345}
-      - DOCKER_INFLUXDB_INIT_ORG=${INFLUXDB_ORG:-homelab}
-      - DOCKER_INFLUXDB_INIT_BUCKET=${INFLUXDB_BUCKET:-eternal_telemetry}
-      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUXDB_TOKEN:-homelab-influxdb-master-auth-token-2026}
-      - DOCKER_INFLUXDB_INIT_RETENTION=90d
-    volumes:
-      - influxdb-storage:/var/lib/influxdb2
-      - influxdb-config:/etc/influxdb2
-    networks:
-      - homelab-network
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8086/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-
-  # ═════════════════════════════════════════════════════════════════
-  # 7. MINIO S3-COMPATIBLE OBJECT STORAGE (:9000 API, :9002 CONSOLE)
-  # Persistent cloud object storage for deployed apps (Laravel, Node, Python, Backups)
-  # ═════════════════════════════════════════════════════════════════
-  minio:
-    image: pgsty/silo:latest
-    container_name: homelab_minio
-    restart: unless-stopped
-    command: server /data --console-address ":9002"
-    mem_limit: 512m
-    cpus: 0.5
-    ports:
-      - "${MINIO_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9002}:9002"
-    environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-admin}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-admin12345}
-    volumes:
-      - minio-storage:/data
-    networks:
-      - homelab-network
-      - psm-network
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 5s
-
-  minio-init:
-    image: pgsty/mc:latest
-    container_name: homelab_minio_init
-    restart: "no"
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      MC_CMD=$$(command -v mc || command -v mcli || echo '/usr/bin/mc');
-      $$MC_CMD alias set myminio http://minio:9000 $${MINIO_ROOT_USER:-admin} $${MINIO_ROOT_PASSWORD:-admin12345};
-      $$MC_CMD mb myminio/homelab-storage --ignore-existing;
-      $$MC_CMD mb myminio/stock-umkm --ignore-existing;
-      $$MC_CMD mb myminio/backups --ignore-existing;
-      $$MC_CMD anonymous set download myminio/homelab-storage;
-      $$MC_CMD anonymous set download myminio/stock-umkm;
-      echo 'MinIO buckets and policies successfully initialized';
-      exit 0;
-      "
-    networks:
-      - homelab-network
-      - psm-network
-
 # ─────────────────────────────────────────────────────────────────────────────
 # PERSISTENT VOLUMES
 # ─────────────────────────────────────────────────────────────────────────────
 volumes:
   psm-storage:
   homelab-backups:
-  influxdb-storage:
-  influxdb-config:
-  minio-storage:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # INTERNAL NETWORKS

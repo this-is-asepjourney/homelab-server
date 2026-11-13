@@ -13,6 +13,17 @@ from apps.agent.app.deployment.dockerfile_generator import (
 )
 
 
+def should_log_build_line(line: str) -> bool:
+    if not line:
+        return False
+    # Skip high-frequency BuildKit transfer/progress ticks that flood and bloat the database
+    if re.search(r"^\s*#\d+\s+(?:transferring|extracting|preparing)\b", line, re.I):
+        return False
+    if re.search(r"^\s*#\d+\s+\[.*\]\s+\d+\.\d+s\s*$", line):
+        return False
+    return True
+
+
 class DeploymentEngine:
     @staticmethod
     def sanitize_db_name(raw_name: str) -> str:
@@ -789,7 +800,7 @@ class DeploymentEngine:
             proc = subprocess.Popen(cmd, cwd=workspace_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             for line in proc.stdout:
                 clean = line.strip()
-                if clean:
+                if clean and should_log_build_line(clean):
                     log_callback("info", clean)
             proc.wait()
             if proc.returncode != 0:
@@ -1082,7 +1093,7 @@ class DeploymentEngine:
                 build_proc = subprocess.Popen(build_cmd, cwd=workspace_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
                 for line in build_proc.stdout:
                     clean = line.strip()
-                    if clean:
+                    if clean and should_log_build_line(clean):
                         log_callback("info", clean)
                 build_proc.wait()
                 if build_proc.returncode != 0:
@@ -1099,11 +1110,13 @@ class DeploymentEngine:
             subprocess.run([docker_bin, "stop", sanitized_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             subprocess.run([docker_bin, "rm", "-f", sanitized_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            # Ports, Network & Run
+            # Ports, Network & Run (with lean resource boundaries for homelab stability)
             run_cmd = [
                 docker_bin, "run", "-d",
                 "--restart", "unless-stopped",
                 "--name", sanitized_name,
+                "--memory=768m",
+                "--cpus=1.0",
                 "--add-host=host.docker.internal:host-gateway",
             ]
             if target_network:

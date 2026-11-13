@@ -623,11 +623,19 @@ async def rollback_deployment(
 @router.get("/{deployment_id}/logs", response_model=List[DeploymentLogResponse])
 def get_deployment_logs(
     deployment_id: str,
+    limit: Optional[int] = 1000,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    logs = db.query(DeploymentLog).filter(
+    query = db.query(DeploymentLog).filter(
         DeploymentLog.deployment_id == deployment_id
-    ).order_by(DeploymentLog.sequence.asc()).all()
-    return logs
+    ).order_by(DeploymentLog.sequence.asc())
+
+    if limit and limit > 0:
+        total_count = query.count()
+        if total_count > limit:
+            offset = total_count - limit
+            return query.offset(offset).limit(limit).all()
+
+    return query.all()
 

@@ -371,6 +371,5 @@ def provision_influxdb():
 if __name__ == "__main__":
     provision_mysql()
     provision_postgres()
-    provision_influxdb()
     print("\n[SUCCESS] All isolated project databases have been provisioned successfully!")
 
